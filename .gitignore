@@ -1,0 +1,5 @@
+.venv/
+files/
+models/
+.env
+todo.md
