@@ -3,3 +3,4 @@ files/
 models/
 .env
 todo.md
+*.pyc
