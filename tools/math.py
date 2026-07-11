@@ -1,4 +1,4 @@
-from typing import Any, Callable, TypedDict
+from tools.base import ToolEntry
 
 
 def add(a: int, b: int) -> int:
@@ -15,12 +15,6 @@ def multiply(a: int, b: int) -> int:
 
 def divide(a: int, b: int) -> float:
     return a / b
-
-
-class ToolEntry(TypedDict):
-    function: Callable[..., Any]
-    schema: dict[str, Any]
-
 
 TOOLS: dict[str, ToolEntry] = {
     "add": {
