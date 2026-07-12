@@ -7,21 +7,12 @@ import shutil
 FILES_ROOT = Path(os.environ.get("FILES_ROOT", "./files")).resolve()
 MAX_READ_BYTES = int(os.environ.get("MAX_READ_BYTES", 1_000_000))
 
-RED = "\033[91m"
-RESET = "\033[0m"
-
 
 def verify_path(path: str) -> Path:
     resolved = (FILES_ROOT / path).resolve()
     if not resolved.is_relative_to(FILES_ROOT):
         raise ValueError(f"Path '{path}' resolves outside of {FILES_ROOT}")
     return resolved
-
-
-def confirm_action(description: str) -> None:
-    answer = input(f"{RED}VALIDATION{RESET}: {description} Type 'yes' to confirm: ")
-    if answer.strip().lower() != "yes":
-        raise ValueError("Action cancelled: user did not confirm")
 
 
 def require_existing_parent(resolved: Path) -> None:
@@ -99,7 +90,6 @@ def append_file(path: str, text: str) -> str:
 
 def delete_file(path: str) -> str:
     resolved = verify_path(path)
-    confirm_action(f"Delete file '{path}'?")
     resolved.unlink()
     return f"Deleted {path}"
 
@@ -164,7 +154,6 @@ def copy(src_path: str, dst_path: str) -> str:
 
 def remove_directory(path: str) -> str:
     resolved = verify_path(path)
-    confirm_action(f"Remove directory '{path}'?")
     resolved.rmdir()
     return f"Removed directory {path}"
 

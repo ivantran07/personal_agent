@@ -5,7 +5,7 @@ import sys
 import yaml
 from dotenv import load_dotenv
 import asyncio
-from tools.files import TOOL_SCHEMAS, TOOLS
+from tools import TOOL_SCHEMAS, TOOLS
 
 RED = "\033[91m"
 GREEN = "\033[92m"
@@ -14,6 +14,60 @@ YELLOW = "\033[93m"
 RESET = "\033[0m"
 
 litellm.suppress_debug_info = True
+
+CONFIRM_TOOLS = {"delete_file", "remove_directory"}
+
+
+async def run_tool_call(tool):
+    name = tool.function.name
+    string_arguments = tool.function.arguments
+
+    if name not in TOOLS:
+        tool_content = f"Tool {name} does not exist. The list of available tools are {list(TOOLS.keys())}"
+        print(f"{RED}TOOL{RESET}: {name} does not exist")
+    else:
+        try:
+            arguments = json.loads(string_arguments)
+            tool_content = str(
+                await asyncio.to_thread(TOOLS[name]["function"], **arguments)
+            )
+            print(
+                f"{GREEN}TOOL{RESET}: {name} returned with arguments {string_arguments}"
+            )
+
+        except Exception as e:
+            tool_content = f"An exception occured: {e}. Try differently."
+            print(f"{RED}TOOL{RESET}: {name} failed with arguments {string_arguments}")
+
+    return {"tool_call_id": tool.id, "role": "tool", "content": tool_content}
+
+
+async def run_tool_calls(message):
+    tool_results = []
+    approved_calls = []
+    for tool in message.tool_calls:
+        if tool.function.name in CONFIRM_TOOLS:
+            answer = input(
+                f"{RED}VALIDATION{RESET}: Run {tool.function.name} with arguments "
+                f"{tool.function.arguments}? Type 'yes' to confirm: "
+            )
+            if answer.strip().lower() != "yes":
+                print(f"{RED}TOOL{RESET}: {tool.function.name} cancelled by user")
+                tool_results.append(
+                    {
+                        "tool_call_id": tool.id,
+                        "role": "tool",
+                        "content": "Action cancelled: user did not confirm",
+                    }
+                )
+                continue
+        approved_calls.append(tool)
+
+    approved_tool_results = await asyncio.gather(
+        *(run_tool_call(tool) for tool in approved_calls)
+    )
+    tool_results.extend(approved_tool_results)
+    return tool_results
 
 
 async def run_agent_loop(messages, config):
@@ -58,30 +112,8 @@ async def run_agent_loop(messages, config):
         if not message.tool_calls:
             break
 
-        for tool in message.tool_calls:
-            name = tool.function.name
-            string_arguments = tool.function.arguments
-
-            if name not in TOOLS:
-                tool_content = f"Tool {name} does not exist. The list of available tools are {list(TOOLS.keys())}"
-                print(f"{RED}TOOL{RESET}: {name} does not exist")
-            else:
-                try:
-                    arguments = json.loads(string_arguments)
-                    tool_content = str(TOOLS[name]["function"](**arguments))
-                    print(
-                        f"{GREEN}TOOL{RESET}: {name} returned with arguments {string_arguments}"
-                    )
-
-                except Exception as e:
-                    tool_content = f"An exception occured: {e}. Try differently."
-                    print(
-                        f"{RED}TOOL{RESET}: {name} failed with arguments {string_arguments}"
-                    )
-
-            messages.append(
-                {"tool_call_id": tool.id, "role": "tool", "content": tool_content}
-            )
+        tool_results = await run_tool_calls(message)
+        messages.extend(tool_results)
 
     else:
         print(f"{YELLOW}Max iterations reached without a final answer{RESET}")
