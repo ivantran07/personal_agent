@@ -1,3 +1,4 @@
+import litellm
 from litellm import acompletion
 import json
 import sys
@@ -12,10 +13,13 @@ YELLOW = "\033[93m"
 
 RESET = "\033[0m"
 
+litellm.suppress_debug_info = True
+
 
 async def run_agent_loop(messages, config):
     user_prompt = input(f"{GREEN}USER{RESET}: ")
     messages.append({"role": "user", "content": user_prompt})
+    model_shown = False
 
     for _ in range(config["max_iterations"]):
         response = await acompletion(
@@ -27,6 +31,10 @@ async def run_agent_loop(messages, config):
             api_base=config.get("api_base"),
             api_key=config.get("api_key"),
         )
+
+        if not model_shown:
+            model_shown = True
+            print(f"{YELLOW}MODEL: {response.model}{RESET}")
 
         if response.choices[0].finish_reason == "length":
             messages.append(

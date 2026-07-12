@@ -10,7 +10,8 @@ MAX_READ_BYTES = int(os.environ.get("MAX_READ_BYTES", 1_000_000))
 
 def verify_path(path: str) -> Path:
     resolved = (FILES_ROOT / path).resolve()
-    assert resolved.is_relative_to(FILES_ROOT)
+    if not resolved.is_relative_to(FILES_ROOT):
+        raise ValueError(f"Path '{path}' resolves outside of {FILES_ROOT}")
     return resolved
 
 
@@ -57,15 +58,27 @@ def replace(path: str, old_str: str, new_str: str) -> str:
         raise ValueError(
             f"'{old_str}' matches {count} times in {path}, must match exactly once"
         )
+    match_start = content.find(old_str)
     new_content = content.replace(old_str, new_str, 1)
     resolved.write_text(new_content, encoding="utf8")
 
     lines = new_content.splitlines()
-    match_line = new_content[: new_content.find(new_str)].count("\n")
+    match_line = content[:match_start].count("\n")
     start = max(0, match_line - 2)
     end = min(len(lines), match_line + new_str.count("\n") + 3)
     snippet = "\n".join(lines[start:end])
     return f"Replaced 1 occurrence in {path}:\n{snippet}"
+
+
+def replace_all(path: str, old_str: str, new_str: str) -> str:
+    resolved = verify_path(path)
+    content = resolved.read_text(encoding="utf8")
+    count = content.count(old_str)
+    if count == 0:
+        raise ValueError(f"'{old_str}' not found in {path}")
+    new_content = content.replace(old_str, new_str)
+    resolved.write_text(new_content, encoding="utf8")
+    return f"Replaced {count} occurrence(s) in {path}"
 
 
 def append_file(path: str, text: str) -> str:
@@ -139,6 +152,20 @@ def copy(src_path: str, dst_path: str) -> str:
     return f"Copied {src_path} to {dst_path}"
 
 
+def remove_directory(path: str) -> str:
+    resolved = verify_path(path)
+    resolved.rmdir()
+    return f"Removed directory {path}"
+
+
+def copy_directory(src_path: str, dst_path: str) -> str:
+    resolved_src = verify_path(src_path)
+    resolved_dst = verify_path(dst_path)
+    require_existing_parent(resolved_dst)
+    shutil.copytree(resolved_src, resolved_dst)
+    return f"Copied directory {src_path} to {dst_path}"
+
+
 TOOLS: dict[str, ToolEntry] = {
     "read_file": {
         "function": read_file,
@@ -193,6 +220,25 @@ TOOLS: dict[str, ToolEntry] = {
             "function": {
                 "name": "replace",
                 "description": "Replace old_str with new_str in the file at the given path. old_str must match exactly once in the file, otherwise the call fails",
+                "parameters": {
+                    "properties": {
+                        "path": {"type": "string"},
+                        "old_str": {"type": "string"},
+                        "new_str": {"type": "string"},
+                    },
+                    "required": ["path", "old_str", "new_str"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    },
+    "replace_all": {
+        "function": replace_all,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "replace_all",
+                "description": "Replace every occurrence of old_str with new_str in the file at the given path",
                 "parameters": {
                     "properties": {
                         "path": {"type": "string"},
@@ -361,6 +407,39 @@ TOOLS: dict[str, ToolEntry] = {
             "function": {
                 "name": "copy",
                 "description": "Copy a file from src_path to dst_path. The destination's parent directory must already exist",
+                "parameters": {
+                    "properties": {
+                        "src_path": {"type": "string"},
+                        "dst_path": {"type": "string"},
+                    },
+                    "required": ["src_path", "dst_path"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    },
+    "remove_directory": {
+        "function": remove_directory,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "remove_directory",
+                "description": "Remove the directory at the given path. The directory must be empty",
+                "parameters": {
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    },
+    "copy_directory": {
+        "function": copy_directory,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "copy_directory",
+                "description": "Recursively copy a directory tree from src_path to dst_path. dst_path must not already exist, and its parent directory must already exist",
                 "parameters": {
                     "properties": {
                         "src_path": {"type": "string"},

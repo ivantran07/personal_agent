@@ -1,6 +1,17 @@
-active_profile: gemini
+active_profile: openrouter
 
 profiles:
+  openrouter:
+    model: openrouter/tencent/hy3:free
+    api_base: https://openrouter.ai/api/v1
+    fallbacks:
+      - openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+      - openrouter/poolside/laguna-m.1:free
+      - openrouter/cohere/north-mini-code:free
+      - openrouter/poolside/laguna-xs-2.1:free
+      - openrouter/openai/gpt-oss-120b:free
+      - openrouter/google/gemma-4-31b-it:free
+
   gemini:
     model: gemini/gemini-3-flash-preview
     fallbacks:
