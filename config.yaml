@@ -1,11 +1,20 @@
-model: gemini/gemini-3-flash-preview
-fallbacks:
-  - gemini/gemini-3.1-flash-lite
-  - gemini/gemini-2.5-flash-lite
-  - gemini/gemini-2.5-flash
-  - gemini/gemma-4-31b-it
-  - gemini/gemma-4-26b-a4b-it
+active_profile: gemini
+
+profiles:
+  gemini:
+    model: gemini/gemini-3-flash-preview
+    fallbacks:
+      - gemini/gemini-3.1-flash-lite
+      - gemini/gemini-2.5-flash-lite
+      - gemini/gemini-2.5-flash
+      - gemini/gemma-4-31b-it
+      - gemini/gemma-4-26b-a4b-it
+
+  llama:
+    model: openai/qwen3.5-2b
+    api_base: http://127.0.0.1:8080/v1
+    api_key: sk-noop
+
 max_completion_tokens: 4096
-max_tool_calls: 10
-system_prompt: 
-max_iterations: 10
+system_prompt:
+max_iterations: 200
