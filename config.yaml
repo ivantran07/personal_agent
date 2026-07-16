@@ -26,6 +26,8 @@ profiles:
     api_base: http://127.0.0.1:8080/v1
     api_key: sk-noop
 
+embedding_model: gemini/gemini-embedding-001
+
 max_completion_tokens: 4096
 system_prompt:
 max_iterations: 200

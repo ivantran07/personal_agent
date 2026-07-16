@@ -1,6 +1,8 @@
 .venv/
 files/
 models/
+pgdata/
 .env
-todo.md
 *.pyc
+NOTES.md
+ROADMAP.md
