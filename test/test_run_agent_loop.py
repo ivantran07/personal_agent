@@ -94,13 +94,9 @@ async def test_tool_call_iteration_appends_messages_in_order(mock_input, mock_ac
         fake_response_factory(message=message_2),
     ]
 
-    # A plain list side_effect would return the right values, but
-    # mock_acompletion.call_args_list stores a REFERENCE to the same
-    # `messages` list every time (Python passes lists by reference) -- by the
-    # time we inspect it after the loop finishes, every recorded call would
-    # point at the same, fully-mutated list, making a "longer than" comparison
-    # meaningless. Snapshotting the length ourselves, inside a custom
-    # side_effect, captures it at the actual moment of each call instead.
+    # call_args_list stores a REFERENCE to the same `messages` list each time,
+    # so comparing lengths after the loop finishes would compare the same,
+    # fully-mutated list to itself. Snapshot the length live instead.
     seen_message_lengths = []
 
     def fake_acompletion(*args, **kwargs):
@@ -182,8 +178,6 @@ async def test_max_iterations_exhausted_prints_message(mock_input, mock_acomplet
     patched_tools["noop"] = {"function": lambda: None, "schema": {}}
     tool_call = tool_call_factory(id="call_1", name="noop", arguments="{}")
     fake_message = fake_message_factory(content="", tool_calls=[tool_call])
-    # Every call returns the same response -> tool_calls is always truthy, so
-    # the loop never breaks and runs exactly max_iterations times.
     mock_acompletion.return_value = fake_response_factory(message=fake_message)
 
     messages = []
@@ -232,7 +226,6 @@ async def test_acompletion_called_with_expected_kwargs_and_defaults(mock_input, 
     fake_message = fake_message_factory(content="done", tool_calls=None)
     mock_acompletion.return_value = fake_response_factory(message=fake_message)
 
-    # Full config: fallbacks/api_base/api_key explicitly provided.
     config = {
         "model": "test-model",
         "max_completion_tokens": 100,
@@ -251,8 +244,6 @@ async def test_acompletion_called_with_expected_kwargs_and_defaults(mock_input, 
     assert call_kwargs["api_base"] == "https://example.test"
     assert call_kwargs["api_key"] == "secret"
 
-    # Minimal config: fallbacks/api_base/api_key omitted entirely -> .get()
-    # defaults ([]/None/None) are used instead of raising KeyError.
     mock_acompletion.reset_mock()
     minimal_config = {
         "model": "test-model",

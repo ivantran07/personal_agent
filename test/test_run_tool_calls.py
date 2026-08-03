@@ -20,6 +20,7 @@ def confirm_tools(monkeypatch):
     monkeypatch.setattr("main.CONFIRM_TOOLS", tools)
     return tools
 
+
 async def test_empty_tool_calls_returns_empty_list(fake_message_factory, mock_input):
     """Case 1: message.tool_calls=[] -> returns [], input() never called."""
     fake_message = fake_message_factory(content="", tool_calls=[])
@@ -28,6 +29,7 @@ async def test_empty_tool_calls_returns_empty_list(fake_message_factory, mock_in
 
     assert results == []
     mock_input.assert_not_called()
+
 
 async def test_all_normal_tools_run_without_prompt(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
     """Case 2: tools not in CONFIRM_TOOLS run with no input() prompt; results
@@ -54,22 +56,24 @@ async def test_confirmed_tool_runs(confirm_tools, patched_tools, tool_call_facto
     actually runs and its real output surfaces in content.
     """
     tool_runs = False
+
     def add(x: int, y: int) -> int:
         nonlocal tool_runs
-        tool_runs= True
+        tool_runs = True
         return x + y
+
     patched_tools["add"] = {"function": add, "schema": {}}
     confirm_tools.add("add")
+    mock_input.side_effect = None
+    mock_input.return_value = "yes"
 
     tool_call = tool_call_factory(id="call_1", name="add", arguments='{"x": 1, "y": 2}')
     fake_message = fake_message_factory(content="", tool_calls=[tool_call])
-    
-    mock_input.side_effect = None
-    mock_input.return_value = "yes"
-    result = await main.run_tool_calls(fake_message)
+
+    results = await main.run_tool_calls(fake_message)
 
     assert tool_runs
-    assert result[0]["content"] == "3"
+    assert results[0]["content"] == "3"
 
 
 async def test_declined_tool_does_not_run(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
@@ -189,7 +193,7 @@ async def test_mixed_decline_and_normal_ordering(confirm_tools, patched_tools, t
     patched_tools["confirm_me"] = {"function": lambda: "confirmed", "schema": {}}
     patched_tools["normal"] = {"function": lambda: "normal", "schema": {}}
     mock_input.side_effect = None
-    mock_input.return_value = "no"  # decline every confirmation prompt
+    mock_input.return_value = "no"
 
     tool_calls = [
         tool_call_factory(id="declined_1", name="confirm_me", arguments="{}"),
@@ -218,7 +222,7 @@ async def test_confirmed_and_normal_preserve_relative_order(confirm_tools, patch
     patched_tools["confirm_me"] = {"function": lambda: "confirmed", "schema": {}}
     patched_tools["normal"] = {"function": lambda: "normal", "schema": {}}
     mock_input.side_effect = None
-    mock_input.return_value = "yes"  # accept every confirmation prompt
+    mock_input.return_value = "yes"
 
     tool_calls = [
         tool_call_factory(id="call_1", name="confirm_me", arguments="{}"),

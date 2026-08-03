@@ -7,17 +7,11 @@ async def test_unknown_tool_returns_error_message(patched_tools, tool_call_facto
     """Case 1: a tool name absent from main.TOOLS returns a "does not exist"
     content string that lists TOOLS.keys(), without raising.
     """
-    # Arrange: patched_tools is already an empty dict (main.TOOLS patched to
-    # {} for this test), so any name we pick below is guaranteed unregistered.
-    # Adding one real entry makes the "available tools" part of the message
-    # non-trivial to check.
     patched_tools["known_tool"] = {"function": lambda: None, "schema": {}}
     tool = tool_call_factory(id="call_1", name="does_not_exist", arguments="{}")
 
-    # Act
     result = await main.run_tool_call(tool)
 
-    # Assert
     assert result == {
         "tool_call_id": "call_1",
         "role": "tool",
@@ -73,7 +67,7 @@ async def test_malformed_json_arguments_are_caught(patched_tools, tool_call_fact
     # otherwise "name not in TOOLS" fires first and json.loads is never
     # reached at all.
     patched_tools["add"] = {"function": add, "schema": {}}
-    tool = tool_call_factory(id="call_1", name="add", arguments='{"x": 1 "y": 2}')  # missing comma
+    tool = tool_call_factory(id="call_1", name="add", arguments='{"x": 1 "y": 2}')
 
     result = await main.run_tool_call(tool)
 
@@ -110,7 +104,7 @@ async def test_tool_function_raises_type_error_on_bad_kwargs(patched_tools, tool
         return x + y
 
     patched_tools["add"] = {"function": add, "schema": {}}
-    tool = tool_call_factory(id="call_1", name="add", arguments='{"x": 1}')  # missing "y"
+    tool = tool_call_factory(id="call_1", name="add", arguments='{"x": 1}')
 
     result = await main.run_tool_call(tool)
 
@@ -143,14 +137,12 @@ async def test_failure_paths_print_red_tool_line(patched_tools, tool_call_factor
     f"{main.RED}TOOL{main.RESET}: {name} ..." (two related assertions, or split
     into two separate test functions if you prefer one behavior per test).
     """
-    # Path A: unknown tool -> "TOOL: {name} does not exist"
     unknown_tool = tool_call_factory(id="call_1", name="does_not_exist", arguments="{}")
     await main.run_tool_call(unknown_tool)
 
     captured = capsys.readouterr()
     assert captured.out == f"{main.RED}TOOL{main.RESET}: does_not_exist does not exist\n"
 
-    # Path B: registered tool that raises -> "TOOL: {name} failed with arguments {arguments}"
     def raises():
         raise ValueError("boom")
 
@@ -176,9 +168,9 @@ async def test_result_dict_has_exactly_expected_keys(patched_tools, tool_call_fa
     patched_tools["raises"] = {"function": raises, "schema": {}}
 
     scenarios = [
-        tool_call_factory(id="call_1", name="add", arguments='{"x": 1, "y": 2}'),  # success
-        tool_call_factory(id="call_2", name="does_not_exist", arguments="{}"),  # unknown
-        tool_call_factory(id="call_3", name="raises", arguments="{}"),  # exception
+        tool_call_factory(id="call_1", name="add", arguments='{"x": 1, "y": 2}'),
+        tool_call_factory(id="call_2", name="does_not_exist", arguments="{}"),
+        tool_call_factory(id="call_3", name="raises", arguments="{}"),
     ]
 
     for tool in scenarios:
