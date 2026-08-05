@@ -16,6 +16,7 @@ def multiply(a: int, b: int) -> int:
 def divide(a: int, b: int) -> float:
     return a / b
 
+
 TOOLS: dict[str, ToolEntry] = {
     "add": {
         "function": add,

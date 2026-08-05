@@ -1,11 +1,12 @@
-from tools.base import ToolEntry
-from pathlib import Path
 import os
 import re
 import shutil
+from pathlib import Path
+
+from tools.base import ToolEntry
 
 FILES_ROOT = Path(os.environ.get("FILES_ROOT", "./files")).resolve()
-MAX_READ_BYTES = int(os.environ.get("MAX_READ_BYTES", 1_000_000))
+MAX_READ_BYTES = int(os.environ.get("MAX_READ_BYTES", "1000000"))
 
 
 def verify_path(path: str) -> Path:

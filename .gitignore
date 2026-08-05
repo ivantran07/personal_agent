@@ -6,3 +6,5 @@ pgdata/
 *.pyc
 NOTES.md
 ROADMAP.md
+SUMMARY.md
+GITHUB_ACTIONS_TUTORIAL.md

@@ -1,11 +1,13 @@
-from tools.base import ToolEntry
 import os
+
 import requests
 import trafilatura
 from ddgs import DDGS
 
-MAX_FETCH_BYTES = int(os.environ.get("MAX_FETCH_BYTES", 2_000_000))
-REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", 15))
+from tools.base import ToolEntry
+
+MAX_FETCH_BYTES = int(os.environ.get("MAX_FETCH_BYTES", "2000000"))
+REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "15"))
 USER_AGENT = "personal-agent/0.1"
 
 

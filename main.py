@@ -1,10 +1,12 @@
-import litellm
-from litellm import acompletion
+import asyncio
 import json
 import sys
+
+import litellm
 import yaml
 from dotenv import load_dotenv
-import asyncio
+from litellm import acompletion
+
 from tools import TOOL_SCHEMAS, TOOLS
 
 RED = "\033[91m"
@@ -35,7 +37,7 @@ async def run_tool_call(tool):
                 f"{GREEN}TOOL{RESET}: {name} returned with arguments {string_arguments}"
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - tool dispatcher must survive arbitrary tool failures
             tool_content = f"An exception occured: {e}. Try differently."
             print(f"{RED}TOOL{RESET}: {name} failed with arguments {string_arguments}")
 
@@ -122,7 +124,7 @@ async def run_agent_loop(messages, config):
 async def main():
     load_dotenv()
 
-    with open("config.yaml", encoding="utf8") as f:
+    with open("config.yaml", encoding="utf8") as f:  # noqa: ASYNC230 - one-time startup read, before event loop has any contention
         config = yaml.safe_load(f)
 
     profile_name = sys.argv[1] if len(sys.argv) > 1 else config["active_profile"]

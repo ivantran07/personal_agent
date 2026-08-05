@@ -1,3 +1,4 @@
+import re
 import threading
 
 import litellm
@@ -6,7 +7,7 @@ import psycopg
 import yaml
 from pgvector import Vector
 from pgvector.psycopg import register_vector
-import re
+
 from tools.base import ToolEntry
 
 PGDATA_DIR = "./pgdata"
@@ -20,11 +21,14 @@ _lock = threading.Lock()
 _PARAGRAPH_SPLIT = re.compile(r"\n\s*\n")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
+
 def _hard_split(s: str, target: int) -> list[str]:
     return [s[i : i + target] for i in range(0, len(s), target)]
 
 
-def chunk_text(text: str, target_chars: int = 1200, overlap_chars: int = 200) -> list[str]:
+def chunk_text(
+    text: str, target_chars: int = 1200, overlap_chars: int = 200
+) -> list[str]:
     """Split text into chunks of ~target_chars, breaking along paragraph,
     then sentence, then hard character boundaries. Consecutive chunks share
     the previous chunk's last overlap_chars. No chunk exceeds
@@ -53,6 +57,7 @@ def chunk_text(text: str, target_chars: int = 1200, overlap_chars: int = 200) ->
     if chunk:
         chunks.append(chunk)
     return chunks
+
 
 def _get_embedding_config() -> dict:
     global _embedding_config
@@ -102,14 +107,20 @@ def rag_ingest(content: str) -> str:
 def rag_search(query: str, limit: int = 5) -> str:
     embedding = get_embedding(query)
     with _lock:
-        rows = _get_conn().execute(
-            "SELECT content, embedding <=> %s AS distance "
-            "FROM documents ORDER BY distance LIMIT %s",
-            (embedding, limit),
-        ).fetchall()
+        rows = (
+            _get_conn()
+            .execute(
+                "SELECT content, embedding <=> %s AS distance "
+                "FROM documents ORDER BY distance LIMIT %s",
+                (embedding, limit),
+            )
+            .fetchall()
+        )
     if not rows:
         return "No documents stored yet"
-    return "\n---\n".join(f"[distance {distance:.3f}] {content}" for content, distance in rows)
+    return "\n---\n".join(
+        f"[distance {distance:.3f}] {content}" for content, distance in rows
+    )
 
 
 TOOLS: dict[str, ToolEntry] = {

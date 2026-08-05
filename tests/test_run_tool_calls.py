@@ -31,7 +31,9 @@ async def test_empty_tool_calls_returns_empty_list(fake_message_factory, mock_in
     mock_input.assert_not_called()
 
 
-async def test_all_normal_tools_run_without_prompt(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_all_normal_tools_run_without_prompt(
+    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+):
     """Case 2: tools not in CONFIRM_TOOLS run with no input() prompt; results
     come back in original order.
     """
@@ -51,7 +53,9 @@ async def test_all_normal_tools_run_without_prompt(confirm_tools, patched_tools,
     assert [r["tool_call_id"] for r in results] == ["call_1", "call_2", "call_3"]
 
 
-async def test_confirmed_tool_runs(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_confirmed_tool_runs(
+    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+):
     """Case 3: a CONFIRM_TOOLS tool + input() returning "yes" -> the tool
     actually runs and its real output surfaces in content.
     """
@@ -76,7 +80,9 @@ async def test_confirmed_tool_runs(confirm_tools, patched_tools, tool_call_facto
     assert results[0]["content"] == "3"
 
 
-async def test_declined_tool_does_not_run(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_declined_tool_does_not_run(
+    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+):
     """Case 4: a CONFIRM_TOOLS tool + input() returning "no" -> tool function
     never called; result is exactly the cancellation message dict.
     """
@@ -108,7 +114,14 @@ async def test_declined_tool_does_not_run(confirm_tools, patched_tools, tool_cal
 
 
 @pytest.mark.parametrize("answer", ["yes", "Yes", " yes \n", "YES"])
-async def test_accept_variants(answer, confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_accept_variants(
+    answer,
+    confirm_tools,
+    patched_tools,
+    tool_call_factory,
+    fake_message_factory,
+    mock_input,
+):
     """Case 5: these variants are all treated as acceptance (strip().lower() == "yes")."""
     tool_runs = False
 
@@ -132,7 +145,14 @@ async def test_accept_variants(answer, confirm_tools, patched_tools, tool_call_f
 
 
 @pytest.mark.parametrize("answer", ["", "y", "no", "yess"])
-async def test_decline_variants(answer, confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_decline_variants(
+    answer,
+    confirm_tools,
+    patched_tools,
+    tool_call_factory,
+    fake_message_factory,
+    mock_input,
+):
     """Case 6: these variants are all treated as decline."""
     tool_runs = False
 
@@ -161,7 +181,9 @@ async def test_decline_variants(answer, confirm_tools, patched_tools, tool_call_
     ]
 
 
-async def test_confirmation_prompt_text_exact(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_confirmation_prompt_text_exact(
+    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+):
     """Case 7: the input() prompt matches exactly
     f"{main.RED}VALIDATION{main.RESET}: Run {name} with arguments {arguments}? Type 'yes' to confirm: ".
     """
@@ -183,7 +205,9 @@ async def test_confirmation_prompt_text_exact(confirm_tools, patched_tools, tool
     mock_input.assert_called_once_with(expected_prompt)
 
 
-async def test_mixed_decline_and_normal_ordering(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_mixed_decline_and_normal_ordering(
+    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+):
     """Case 8: decline, normal, decline, normal -> final tool_call_id order is
     [declined_1, declined_2, normal_1, normal_2] (all cancellations first, then
     all approved results) — NOT the original interleaved order. This pins down
@@ -213,7 +237,9 @@ async def test_mixed_decline_and_normal_ordering(confirm_tools, patched_tools, t
     ]
 
 
-async def test_confirmed_and_normal_preserve_relative_order(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_confirmed_and_normal_preserve_relative_order(
+    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+):
     """Case 9: when everything is approved (mix of confirmed-accepted and
     normal tools), result order matches the original relative order (gather
     preserves input order).
@@ -234,10 +260,17 @@ async def test_confirmed_and_normal_preserve_relative_order(confirm_tools, patch
 
     results = await main.run_tool_calls(fake_message)
 
-    assert [r["tool_call_id"] for r in results] == ["call_1", "call_2", "call_3", "call_4"]
+    assert [r["tool_call_id"] for r in results] == [
+        "call_1",
+        "call_2",
+        "call_3",
+        "call_4",
+    ]
 
 
-async def test_concurrent_execution_via_event_rendezvous(patched_tools, tool_call_factory, fake_message_factory):
+async def test_concurrent_execution_via_event_rendezvous(
+    patched_tools, tool_call_factory, fake_message_factory
+):
     """Case 10: two approved tools each set their own threading.Event and then
     .wait() on the other's event with a bounded timeout. If execution were
     actually sequential (not concurrent via asyncio.to_thread), the first tool
@@ -270,7 +303,9 @@ async def test_concurrent_execution_via_event_rendezvous(patched_tools, tool_cal
     assert contents["call_b"] == "True"
 
 
-async def test_approved_tool_raises_still_surfaces(patched_tools, tool_call_factory, fake_message_factory):
+async def test_approved_tool_raises_still_surfaces(
+    patched_tools, tool_call_factory, fake_message_factory
+):
     """Case 11: an approved tool that raises still produces a correctly
     exception-wrapped content with the right tool_call_id in the aggregate result.
     """
@@ -293,7 +328,9 @@ async def test_approved_tool_raises_still_surfaces(patched_tools, tool_call_fact
     ]
 
 
-async def test_all_declined_returns_only_cancellations(confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input):
+async def test_all_declined_returns_only_cancellations(
+    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+):
     """Case 12: every tool call is a declined CONFIRM_TOOLS entry -> approved_calls
     stays empty, asyncio.gather() with no args returns [] without hanging, and
     the final result is exactly the cancellation entries.

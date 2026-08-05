@@ -95,7 +95,9 @@ async def test_tool_function_raises_value_error(patched_tools, tool_call_factory
     }
 
 
-async def test_tool_function_raises_type_error_on_bad_kwargs(patched_tools, tool_call_factory):
+async def test_tool_function_raises_type_error_on_bad_kwargs(
+    patched_tools, tool_call_factory
+):
     """Case 6: JSON arguments missing a required kwarg (or with an extra one)
     causes the underlying call to raise TypeError, wrapped the same way as case 5.
     """
@@ -118,7 +120,9 @@ async def test_tool_function_raises_type_error_on_bad_kwargs(patched_tools, tool
     assert "missing" in result["content"]
 
 
-async def test_success_path_prints_green_tool_line(patched_tools, tool_call_factory, capsys):
+async def test_success_path_prints_green_tool_line(
+    patched_tools, tool_call_factory, capsys
+):
     """Case 7: on success, stdout contains
     f"{main.GREEN}TOOL{main.RESET}: {name} returned with arguments {arguments}".
     """
@@ -129,10 +133,15 @@ async def test_success_path_prints_green_tool_line(patched_tools, tool_call_fact
     await main.run_tool_call(tool)
 
     captured = capsys.readouterr()
-    assert captured.out == f"{main.GREEN}TOOL{main.RESET}: add returned with arguments {arguments}\n"
+    assert (
+        captured.out
+        == f"{main.GREEN}TOOL{main.RESET}: add returned with arguments {arguments}\n"
+    )
 
 
-async def test_failure_paths_print_red_tool_line(patched_tools, tool_call_factory, capsys):
+async def test_failure_paths_print_red_tool_line(
+    patched_tools, tool_call_factory, capsys
+):
     """Case 8: both the unknown-tool path and the raising-tool path print
     f"{main.RED}TOOL{main.RESET}: {name} ..." (two related assertions, or split
     into two separate test functions if you prefer one behavior per test).
@@ -141,7 +150,9 @@ async def test_failure_paths_print_red_tool_line(patched_tools, tool_call_factor
     await main.run_tool_call(unknown_tool)
 
     captured = capsys.readouterr()
-    assert captured.out == f"{main.RED}TOOL{main.RESET}: does_not_exist does not exist\n"
+    assert (
+        captured.out == f"{main.RED}TOOL{main.RESET}: does_not_exist does not exist\n"
+    )
 
     def raises():
         raise ValueError("boom")
@@ -152,7 +163,10 @@ async def test_failure_paths_print_red_tool_line(patched_tools, tool_call_factor
     await main.run_tool_call(raising_tool)
 
     captured = capsys.readouterr()
-    assert captured.out == f"{main.RED}TOOL{main.RESET}: raises failed with arguments {arguments}\n"
+    assert (
+        captured.out
+        == f"{main.RED}TOOL{main.RESET}: raises failed with arguments {arguments}\n"
+    )
 
 
 async def test_result_dict_has_exactly_expected_keys(patched_tools, tool_call_factory):

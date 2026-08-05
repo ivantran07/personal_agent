@@ -11,7 +11,9 @@ import pytest
 import main
 
 
-async def test_input_called_once_for_user_prompt(mock_input, mock_acompletion, fake_response_factory, fake_message_factory):
+async def test_input_called_once_for_user_prompt(
+    mock_input, mock_acompletion, fake_response_factory, fake_message_factory
+):
     """Case 1: input() is called exactly once (before the iteration loop), and
     its return value is appended to messages as {"role": "user", "content": ...}.
     """
@@ -30,7 +32,9 @@ async def test_input_called_once_for_user_prompt(mock_input, mock_acompletion, f
     assert messages[0] == {"role": "user", "content": "hello"}
 
 
-async def test_breaks_when_no_tool_calls(mock_input, mock_acompletion, fake_response_factory, fake_message_factory):
+async def test_breaks_when_no_tool_calls(
+    mock_input, mock_acompletion, fake_response_factory, fake_message_factory
+):
     """Case 2: a response whose message.tool_calls is falsy ends the loop after
     exactly one acompletion call.
     """
@@ -48,7 +52,15 @@ async def test_breaks_when_no_tool_calls(mock_input, mock_acompletion, fake_resp
     assert mock_acompletion.call_count == 1
 
 
-async def test_model_name_printed_once_across_iterations(mock_input, mock_acompletion, fake_response_factory, fake_message_factory, patched_tools, tool_call_factory, capsys):
+async def test_model_name_printed_once_across_iterations(
+    mock_input,
+    mock_acompletion,
+    fake_response_factory,
+    fake_message_factory,
+    patched_tools,
+    tool_call_factory,
+    capsys,
+):
     """Case 3: across two acompletion calls (first has tool_calls, second doesn't),
     the yellow "MODEL: ..." line is printed exactly once.
     """
@@ -75,7 +87,14 @@ async def test_model_name_printed_once_across_iterations(mock_input, mock_acompl
     assert captured.out.count(f"{main.YELLOW}MODEL: test-model{main.RESET}") == 1
 
 
-async def test_tool_call_iteration_appends_messages_in_order(mock_input, mock_acompletion, fake_response_factory, fake_message_factory, patched_tools, tool_call_factory):
+async def test_tool_call_iteration_appends_messages_in_order(
+    mock_input,
+    mock_acompletion,
+    fake_response_factory,
+    fake_message_factory,
+    patched_tools,
+    tool_call_factory,
+):
     """Case 4: response 1 has tool_calls mapped to a patched_tools entry,
     response 2 doesn't -> messages end up
     [user, assistant_1, tool_result(s), assistant_2] in that order, and the
@@ -119,7 +138,9 @@ async def test_tool_call_iteration_appends_messages_in_order(mock_input, mock_ac
     assert seen_message_lengths[1] > seen_message_lengths[0]
 
 
-async def test_length_finish_reason_retries_without_appending_assistant_message(mock_input, mock_acompletion, fake_response_factory, fake_message_factory):
+async def test_length_finish_reason_retries_without_appending_assistant_message(
+    mock_input, mock_acompletion, fake_response_factory, fake_message_factory
+):
     """Case 5: finish_reason == "length" appends the "cut off, retry briefly"
     user message and continues; no assistant message is appended for that
     iteration (total message count reflects: user + retry-user + final assistant).
@@ -149,7 +170,9 @@ async def test_length_finish_reason_retries_without_appending_assistant_message(
     ]
 
 
-async def test_empty_choices_raises_index_error(mock_input, mock_acompletion, fake_response_factory):
+async def test_empty_choices_raises_index_error(
+    mock_input, mock_acompletion, fake_response_factory
+):
     """Case 6: KNOWN BUG (see TEST_PLAN.md Context) — response.choices == []
     causes an IndexError on line 93 (finish_reason check) before the intended
     "No choices" guard on line 102 ever runs. This test documents the current,
@@ -167,7 +190,15 @@ async def test_empty_choices_raises_index_error(mock_input, mock_acompletion, fa
         await main.run_agent_loop(messages, config)
 
 
-async def test_max_iterations_exhausted_prints_message(mock_input, mock_acompletion, fake_response_factory, fake_message_factory, patched_tools, tool_call_factory, capsys):
+async def test_max_iterations_exhausted_prints_message(
+    mock_input,
+    mock_acompletion,
+    fake_response_factory,
+    fake_message_factory,
+    patched_tools,
+    tool_call_factory,
+    capsys,
+):
     """Case 7: every response has non-empty tool_calls -> the for/else on the
     iteration loop fires, "Max iterations reached without a final answer" is
     printed, and acompletion is called exactly config["max_iterations"] times.
@@ -187,11 +218,21 @@ async def test_max_iterations_exhausted_prints_message(mock_input, mock_acomplet
 
     assert mock_acompletion.call_count == 3
     captured = capsys.readouterr()
-    assert f"{main.YELLOW}Max iterations reached without a final answer{main.RESET}" in captured.out
+    assert (
+        f"{main.YELLOW}Max iterations reached without a final answer{main.RESET}"
+        in captured.out
+    )
 
 
 @pytest.mark.parametrize("content", ["hello", None, ""])
-async def test_content_print_presence_and_absence(content, mock_input, mock_acompletion, fake_response_factory, fake_message_factory, capsys):
+async def test_content_print_presence_and_absence(
+    content,
+    mock_input,
+    mock_acompletion,
+    fake_response_factory,
+    fake_message_factory,
+    capsys,
+):
     """Case 8: message.content truthy prints the green MODEL content line;
     falsy (None or "") means that line is absent.
     """
@@ -214,7 +255,9 @@ async def test_content_print_presence_and_absence(content, mock_input, mock_acom
         assert expected_line not in captured.out
 
 
-async def test_acompletion_called_with_expected_kwargs_and_defaults(mock_input, mock_acompletion, fake_response_factory, fake_message_factory):
+async def test_acompletion_called_with_expected_kwargs_and_defaults(
+    mock_input, mock_acompletion, fake_response_factory, fake_message_factory
+):
     """Case 9: acompletion is called with model, max_completion_tokens,
     tools=main.TOOL_SCHEMAS, and fallbacks/api_base/api_key derived via
     config.get(...) — including the case where config omits those keys
@@ -258,7 +301,9 @@ async def test_acompletion_called_with_expected_kwargs_and_defaults(mock_input, 
     assert call_kwargs["api_key"] is None
 
 
-async def test_model_dump_return_value_lands_in_messages_unchanged(mock_input, mock_acompletion, fake_response_factory, fake_message_factory):
+async def test_model_dump_return_value_lands_in_messages_unchanged(
+    mock_input, mock_acompletion, fake_response_factory, fake_message_factory
+):
     """Case 10: whatever FakeMessage.model_dump() returns is exactly what gets
     appended into `messages` — no re-serialization or transformation happens.
     """
