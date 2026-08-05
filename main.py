@@ -1,11 +1,13 @@
 import asyncio
 import json
 import sys
+from typing import Any
 
 import litellm
 import yaml
 from dotenv import load_dotenv
 from litellm import acompletion
+from litellm.types.utils import ChatCompletionMessageToolCall, Message
 
 from tools import TOOL_SCHEMAS, TOOLS
 
@@ -20,7 +22,7 @@ litellm.suppress_debug_info = True
 CONFIRM_TOOLS = {"delete_file", "remove_directory"}
 
 
-async def run_tool_call(tool):
+async def run_tool_call(tool: ChatCompletionMessageToolCall) -> dict[str, str]:
     name = tool.function.name
     string_arguments = tool.function.arguments
 
@@ -44,10 +46,10 @@ async def run_tool_call(tool):
     return {"tool_call_id": tool.id, "role": "tool", "content": tool_content}
 
 
-async def run_tool_calls(message):
+async def run_tool_calls(message: Message) -> list[dict[str, str]]:
     tool_results = []
     approved_calls = []
-    for tool in message.tool_calls:
+    for tool in message.tool_calls or []:
         if tool.function.name in CONFIRM_TOOLS:
             answer = input(
                 f"{RED}VALIDATION{RESET}: Run {tool.function.name} with arguments "
@@ -72,7 +74,9 @@ async def run_tool_calls(message):
     return tool_results
 
 
-async def run_agent_loop(messages, config):
+async def run_agent_loop(
+    messages: list[dict[str, Any]], config: dict[str, Any]
+) -> None:
     user_prompt = input(f"{GREEN}USER{RESET}: ")
     messages.append({"role": "user", "content": user_prompt})
     model_shown = False
@@ -121,7 +125,7 @@ async def run_agent_loop(messages, config):
         print(f"{YELLOW}Max iterations reached without a final answer{RESET}")
 
 
-async def main():
+async def main() -> None:
     load_dotenv()
 
     with open("config.yaml", encoding="utf8") as f:  # noqa: ASYNC230 - one-time startup read, before event loop has any contention

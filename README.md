@@ -125,8 +125,7 @@ Note on the file tools: `FILES_ROOT` path-jailing (`tools/files.py`) prevents pa
 ## Roadmap / Known Limitations
 
 - **No real sandboxing yet.** The file tools are path-jailed at the application level, but the process itself runs unrestricted on the host. A Docker-based setup (for real filesystem/process isolation) is planned but not yet implemented.
-- **No automated tests or CI.** Everything has been verified manually so far.
-- **No dev-tooling config.** No linter/formatter (likely `ruff`) or `pytest` wired into `pyproject.toml` yet.
+- **No type checking yet.** Type hints are inconsistent across the codebase and nothing enforces them; a type checker (`ty`) is a likely next addition.
 - **`math.py` is minimal.** Just four basic operations; a safe expression evaluator (rather than one tool per operation) is a likely next step.
 - Possible future additions: document/slide creation tools (e.g. PPT), a dedicated Wikipedia summary tool.
 
