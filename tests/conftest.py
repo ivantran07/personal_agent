@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 import yaml
+from litellm import ModelResponse
 
 
 class StopLoop(Exception):
@@ -32,6 +33,21 @@ class FakeMessage:
             "content": self.content,
             "tool_calls": self.tool_calls,
         }
+
+
+class FakeStream:
+    """Async iterable stand-in for LiteLLM's streaming response wrapper."""
+
+    def __init__(self, model, chunks):
+        self.model = model
+        self._chunks = chunks
+
+    def __aiter__(self):
+        async def iterate():
+            for chunk in self._chunks:
+                yield chunk
+
+        return iterate()
 
 
 @pytest.fixture(autouse=True)
@@ -92,22 +108,61 @@ def fake_message_factory():
 @pytest.fixture
 def fake_response_factory():
     """Factory fixture: _make(model="test-model", finish_reason="stop", message=None,
-    empty_choices=False) -> object shaped like a litellm ModelResponse, i.e.
-    exposes `.model` and `.choices` (a list of objects with `.finish_reason`
-    and `.message`, or an empty list when empty_choices=True).
+    empty_choices=False) -> ModelResponse-spec mock with `.model` and `.choices`.
+
+    Using a spec makes the fake satisfy main.py's ``isinstance(...,
+    ModelResponse)`` safety guard while retaining lightweight test messages.
     """
 
     def _make(
         model="test-model", finish_reason="stop", message=None, empty_choices=False
     ):
-        return SimpleNamespace(
-            model=model,
-            choices=[]
+        response = Mock(spec=ModelResponse)
+        response.model = model
+        response.choices = (
+            []
             if empty_choices
-            else [SimpleNamespace(finish_reason=finish_reason, message=message)],
+            else [SimpleNamespace(finish_reason=finish_reason, message=message)]
         )
+        return response
 
     return _make
+
+
+@pytest.fixture
+def fake_chunk_factory():
+    """Create a streaming chunk with optional choices, delta, and text content."""
+
+    def _make(content=None, *, has_choices=True, has_delta=True):
+        if not has_choices:
+            return SimpleNamespace(choices=[])
+
+        delta = SimpleNamespace(content=content) if has_delta else None
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+    return _make
+
+
+@pytest.fixture
+def fake_stream_factory(fake_chunk_factory):
+    """Create an async stream whose chunks rebuild to ``response`` in tests."""
+
+    def _make(response, model="test-model", chunks=None):
+        chunks = chunks or [fake_chunk_factory()]
+        for chunk in chunks:
+            chunk.final_response = response
+        return FakeStream(model, chunks)
+
+    return _make
+
+
+@pytest.fixture(autouse=True)
+def mock_stream_chunk_builder(monkeypatch):
+    """Rebuild fake streams to their preconfigured final response."""
+
+    mock = Mock(side_effect=lambda chunks, **_: chunks[0].final_response)
+    monkeypatch.setattr("main.litellm.stream_chunk_builder", mock)
+    return mock
 
 
 @pytest.fixture

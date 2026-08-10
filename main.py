@@ -6,7 +6,7 @@ from typing import Any
 import litellm
 import yaml
 from dotenv import load_dotenv
-from litellm import acompletion
+from litellm import ModelResponse, acompletion
 from litellm.types.utils import ChatCompletionMessageToolCall, Message
 
 from tools import TOOL_SCHEMAS, TOOLS
@@ -90,13 +90,41 @@ async def run_agent_loop(
             fallbacks=config.get("fallbacks", []),
             api_base=config.get("api_base"),
             api_key=config.get("api_key"),
+            stream=True,
         )
 
-        if not model_shown:
-            model_shown = True
-            print(f"{YELLOW}MODEL: {response.model}{RESET}")
+        print(f"{GREEN}MODEL{RESET}:")
 
-        if response.choices[0].finish_reason == "length":
+        chunks = []
+        async for chunk in response:
+            if not model_shown:
+                model_shown = True
+                print(f"{YELLOW}MODEL: {response.model}{RESET}")
+
+            chunks.append(chunk)
+
+            if not chunk.choices:
+                continue
+
+            delta = chunk.choices[0].delta
+            if not delta or not delta.content:
+                continue
+
+            print(delta.content, end="", flush=True)
+
+        print()
+
+        rebuilt_response = litellm.stream_chunk_builder(chunks, messages=messages)
+
+        if not isinstance(rebuilt_response, ModelResponse):
+            print("No chat-completion response")
+            return
+
+        if not rebuilt_response.choices:
+            print("No choices")
+            return
+
+        if rebuilt_response.choices[0].finish_reason == "length":
             messages.append(
                 {
                     "role": "user",
@@ -105,15 +133,8 @@ async def run_agent_loop(
             )
             continue
 
-        if not response.choices:
-            print("No choices")
-            return
-
-        message = response.choices[0].message
+        message = rebuilt_response.choices[0].message
         messages.append(message.model_dump())
-
-        if message.content:
-            print(f"{GREEN}MODEL{RESET}: {message.content}")
 
         if not message.tool_calls:
             break
