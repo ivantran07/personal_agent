@@ -29,15 +29,15 @@ I wanted to learn how agent loops and tool-calling work under the hood — the r
 - **Model-agnostic** — powered by [litellm](https://github.com/BerriAI/litellm), so the same agent loop runs against OpenRouter's free-tier models, Gemini, or a local `llama.cpp` server, just by switching a profile in `config.yaml`.
 - **Async, concurrent tool dispatch** — when the model requests multiple tools in one turn, they run concurrently via `asyncio.gather` + `asyncio.to_thread`, instead of one at a time.
 - **Confirm-before-destructive** — tools that mutate data irreversibly (`delete_file`, `remove_directory`) are resolved synchronously with an interactive yes/no prompt *before* any concurrent tool dispatch begins, so confirmation prompts can never interleave with other tool output.
-- **Small, composable tool modules** — file, web, and math tools each live in their own module under `tools/` and get merged into one registry automatically.
+- **Small, composable tool modules** — file, web, math, and RAG tools each live in their own module under `tools/` and get merged into one registry automatically.
 
 ## Installation
 
 Requires Python 3.11+ and [uv](https://github.com/astral-sh/uv).
 
 ```bash
-git clone https://github.com/your-username/personal-agent.git
-cd personal-agent
+git clone https://github.com/ivantran07/personal_agent.git
+cd personal_agent
 uv sync
 cp .env.example .env
 ```
@@ -111,6 +111,10 @@ Restricted to `FILES_ROOT` — any path that resolves outside it is rejected.
 
 `add`, `substract`, `multiply`, `divide` — basic arithmetic, offloaded to avoid relying on the model's arithmetic.
 
+### RAG (`tools/rag.py`)
+
+`rag_ingest`, `rag_search` — store text in a local pgvector database and retrieve the most semantically similar stored documents.
+
 ## Architecture
 
 Each turn of `run_agent_loop` in `main.py`:
@@ -125,7 +129,6 @@ Note on the file tools: `FILES_ROOT` path-jailing (`tools/files.py`) prevents pa
 ## Roadmap / Known Limitations
 
 - **No real sandboxing yet.** The file tools are path-jailed at the application level, but the process itself runs unrestricted on the host. A Docker-based setup (for real filesystem/process isolation) is planned but not yet implemented.
-- **No type checking yet.** Type hints are inconsistent across the codebase and nothing enforces them; a type checker (`ty`) is a likely next addition.
 - **`math.py` is minimal.** Just four basic operations; a safe expression evaluator (rather than one tool per operation) is a likely next step.
 - Possible future additions: document/slide creation tools (e.g. PPT), a dedicated Wikipedia summary tool.
 
