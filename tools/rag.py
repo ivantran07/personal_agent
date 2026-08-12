@@ -1,3 +1,5 @@
+"""Store and semantically search text with pgvector-backed RAG tools."""
+
 import re
 import threading
 
@@ -23,6 +25,7 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
 def _hard_split(s: str, target: int) -> list[str]:
+    """Split a string into fixed-size pieces when natural boundaries are absent."""
     return [s[i : i + target] for i in range(0, len(s), target)]
 
 
@@ -60,6 +63,7 @@ def chunk_text(
 
 
 def _get_embedding_config() -> dict:
+    """Load and cache embedding settings from the application configuration."""
     global _embedding_config
     if _embedding_config is None:
         with open("config.yaml", encoding="utf8") as f:
@@ -73,6 +77,7 @@ def _get_embedding_config() -> dict:
 
 
 def _get_conn() -> psycopg.Connection:
+    """Create, initialise, and cache the local pgvector database connection."""
     global _conn
     if _conn is None:
         db = pgserver.get_server(PGDATA_DIR)
@@ -90,11 +95,13 @@ def _get_conn() -> psycopg.Connection:
 
 
 def get_embedding(text: str) -> Vector:
+    """Embed text with the configured model and return it as a pgvector value."""
     response = litellm.embedding(input=[text], **_get_embedding_config())
     return Vector(response.data[0]["embedding"])
 
 
 def rag_ingest(content: str) -> str:
+    """Embed and store text so it can be found by later semantic searches."""
     embedding = get_embedding(content)
     with _lock:
         _get_conn().execute(
@@ -105,6 +112,7 @@ def rag_ingest(content: str) -> str:
 
 
 def rag_search(query: str, limit: int = 5) -> str:
+    """Return up to ``limit`` stored documents most similar to a query."""
     embedding = get_embedding(query)
     with _lock:
         rows = (

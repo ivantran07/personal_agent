@@ -1,19 +1,28 @@
+"""Provide small arithmetic tools for the agent."""
+
 from tools.base import ToolEntry
 
 
 def add(a: int, b: int) -> int:
+    """Return the sum of two integers."""
     return a + b
 
 
 def substract(a: int, b: int) -> int:
+    """Return the result of subtracting ``b`` from ``a``.
+
+    The function name preserves the existing tool API's spelling.
+    """
     return a - b
 
 
 def multiply(a: int, b: int) -> int:
+    """Return the product of two integers."""
     return a * b
 
 
 def divide(a: int, b: int) -> float:
+    """Return ``a`` divided by ``b`` as a float."""
     return a / b
 
 

@@ -1,3 +1,5 @@
+"""Provide web-search and readable-page-fetching tools for the agent."""
+
 import os
 
 import requests
@@ -12,6 +14,7 @@ USER_AGENT = "personal-agent/0.1"
 
 
 def fetch_url(url: str) -> str:
+    """Fetch a web page and extract its main readable text content."""
     response = requests.get(
         url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": USER_AGENT}
     )
@@ -27,6 +30,7 @@ def fetch_url(url: str) -> str:
 
 
 def web_search(query: str, max_results: int = 5) -> list[dict]:
+    """Search the web and return concise result metadata for a query."""
     with DDGS() as ddgs:
         results = ddgs.text(query, max_results=max_results)
     return [

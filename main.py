@@ -1,3 +1,5 @@
+"""Run the interactive tool-using personal-agent command-line application."""
+
 import asyncio
 import json
 import sys
@@ -23,6 +25,11 @@ CONFIRM_TOOLS = {"delete_file", "remove_directory"}
 
 
 async def run_tool_call(tool: ChatCompletionMessageToolCall) -> dict[str, str]:
+    """Execute one model-requested tool call and return its chat message result.
+
+    Tool failures, invalid arguments, and unknown tool names are converted into
+    results the model can use to recover on its next turn.
+    """
     name = tool.function.name
     string_arguments = tool.function.arguments
 
@@ -47,6 +54,11 @@ async def run_tool_call(tool: ChatCompletionMessageToolCall) -> dict[str, str]:
 
 
 async def run_tool_calls(message: Message) -> list[dict[str, str]]:
+    """Confirm destructive calls, then execute the approved calls concurrently.
+
+    A declined call receives a cancellation result so the model knows that the
+    requested action was not performed.
+    """
     tool_results = []
     approved_calls = []
     for tool in message.tool_calls or []:
@@ -77,6 +89,12 @@ async def run_tool_calls(message: Message) -> list[dict[str, str]]:
 async def run_agent_loop(
     messages: list[dict[str, Any]], config: dict[str, Any]
 ) -> None:
+    """Handle one user prompt and its model/tool exchange.
+
+    Streams the model response, retries a response cut off by the token limit,
+    and continues executing tool calls until the model produces a final reply
+    or the configured iteration limit is reached.
+    """
     user_prompt = input(f"{GREEN}USER{RESET}: ")
     messages.append({"role": "user", "content": user_prompt})
     model_shown = False
@@ -147,6 +165,7 @@ async def run_agent_loop(
 
 
 async def main() -> None:
+    """Load configuration and run consecutive interactive agent turns."""
     load_dotenv()
 
     with open("config.yaml", encoding="utf8") as f:  # noqa: ASYNC230 - one-time startup read, before event loop has any contention

@@ -1,3 +1,5 @@
+"""Provide file-system tools restricted to the configured files directory."""
+
 import os
 import re
 import shutil
@@ -10,6 +12,7 @@ MAX_READ_BYTES = int(os.environ.get("MAX_READ_BYTES", "1000000"))
 
 
 def verify_path(path: str) -> Path:
+    """Resolve a user path and reject paths outside the permitted root."""
     resolved = (FILES_ROOT / path).resolve()
     if not resolved.is_relative_to(FILES_ROOT):
         raise ValueError(f"Path '{path}' resolves outside of {FILES_ROOT}")
@@ -17,11 +20,13 @@ def verify_path(path: str) -> Path:
 
 
 def require_existing_parent(resolved: Path) -> None:
+    """Ensure that the destination path's parent directory already exists."""
     if not resolved.parent.is_dir():
         raise ValueError(f"Parent directory '{resolved.parent}' does not exist")
 
 
 def check_readable(resolved: Path) -> None:
+    """Reject files that are too large or appear to contain binary data."""
     size = resolved.stat().st_size
     if size > MAX_READ_BYTES:
         raise ValueError(
@@ -34,6 +39,7 @@ def check_readable(resolved: Path) -> None:
 
 
 def read_file(path: str, start_line: int = 0, end_line: int | None = None) -> str:
+    """Read a text file, optionally returning only a zero-indexed line range."""
     resolved = verify_path(path)
     check_readable(resolved)
     with open(resolved, "r", encoding="utf8") as f:
@@ -42,6 +48,7 @@ def read_file(path: str, start_line: int = 0, end_line: int | None = None) -> st
 
 
 def write_file(path: str, text: str) -> str:
+    """Write text to a file, replacing its existing contents if present."""
     resolved = verify_path(path)
     require_existing_parent(resolved)
     with open(resolved, "w", encoding="utf8") as f:
@@ -50,6 +57,7 @@ def write_file(path: str, text: str) -> str:
 
 
 def replace(path: str, old_str: str, new_str: str) -> str:
+    """Replace one required unique string match and return nearby changed text."""
     resolved = verify_path(path)
     content = resolved.read_text(encoding="utf8")
     count = content.count(old_str)
@@ -72,6 +80,7 @@ def replace(path: str, old_str: str, new_str: str) -> str:
 
 
 def replace_all(path: str, old_str: str, new_str: str) -> str:
+    """Replace every occurrence of a required string match in a text file."""
     resolved = verify_path(path)
     content = resolved.read_text(encoding="utf8")
     count = content.count(old_str)
@@ -83,6 +92,7 @@ def replace_all(path: str, old_str: str, new_str: str) -> str:
 
 
 def append_file(path: str, text: str) -> str:
+    """Append text to a file, creating the file when it does not exist."""
     resolved = verify_path(path)
     with open(resolved, "a", encoding="utf8") as f:
         f.write(text)
@@ -90,17 +100,20 @@ def append_file(path: str, text: str) -> str:
 
 
 def delete_file(path: str) -> str:
+    """Delete the file at a permitted path."""
     resolved = verify_path(path)
     resolved.unlink()
     return f"Deleted {path}"
 
 
 def list_files(path: str = ".") -> list[str]:
+    """List the immediate contents of a permitted directory."""
     resolved = verify_path(path)
     return os.listdir(resolved)
 
 
 def glob(pattern: str) -> list[str]:
+    """Return files below the permitted root that match a glob pattern."""
     return [
         str(p)
         for p in FILES_ROOT.glob(pattern)
@@ -109,6 +122,7 @@ def glob(pattern: str) -> list[str]:
 
 
 def grep(pattern: str, path: str) -> list[str]:
+    """Return lines in a text file that match a regular expression."""
     resolved = verify_path(path)
     check_readable(resolved)
     with open(resolved, "r", encoding="utf8") as f:
@@ -116,11 +130,13 @@ def grep(pattern: str, path: str) -> list[str]:
 
 
 def exists_file(path: str) -> bool:
+    """Report whether a permitted file-system path exists."""
     resolved = verify_path(path)
     return resolved.exists()
 
 
 def stat_file(path: str) -> dict:
+    """Return size, modification time, and type information for a path."""
     resolved = verify_path(path)
     info = resolved.stat()
     return {
@@ -132,6 +148,7 @@ def stat_file(path: str) -> dict:
 
 
 def make_directory(path: str) -> str:
+    """Create a directory when its parent already exists."""
     resolved = verify_path(path)
     require_existing_parent(resolved)
     resolved.mkdir(exist_ok=True)
@@ -139,6 +156,7 @@ def make_directory(path: str) -> str:
 
 
 def move(src_path: str, dst_path: str) -> str:
+    """Move or rename a permitted file-system entry."""
     resolved_src = verify_path(src_path)
     resolved_dst = verify_path(dst_path)
     resolved_src.rename(resolved_dst)
@@ -146,6 +164,7 @@ def move(src_path: str, dst_path: str) -> str:
 
 
 def copy(src_path: str, dst_path: str) -> str:
+    """Copy a file to a permitted destination with an existing parent."""
     resolved_src = verify_path(src_path)
     resolved_dst = verify_path(dst_path)
     require_existing_parent(resolved_dst)
@@ -154,12 +173,14 @@ def copy(src_path: str, dst_path: str) -> str:
 
 
 def remove_directory(path: str) -> str:
+    """Remove an empty directory at a permitted path."""
     resolved = verify_path(path)
     resolved.rmdir()
     return f"Removed directory {path}"
 
 
 def copy_directory(src_path: str, dst_path: str) -> str:
+    """Recursively copy a directory tree to a permitted new destination."""
     resolved_src = verify_path(src_path)
     resolved_dst = verify_path(dst_path)
     require_existing_parent(resolved_dst)

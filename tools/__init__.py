@@ -1,3 +1,5 @@
+"""Combine all tool registries into the schemas used by the agent."""
+
 from tools.base import ToolEntry
 from tools.files import TOOLS as FILE_TOOLS
 from tools.math import TOOLS as MATH_TOOLS
