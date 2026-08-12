@@ -70,9 +70,11 @@ Set `active_profile` in `config.yaml` to pick the default, or pass a profile nam
 ## Usage
 
 ```bash
-uv run python main.py            # uses active_profile from config.yaml
-uv run python main.py gemini     # overrides the profile for this run
+uv run personal-agent            # uses active_profile from config.yaml
+uv run personal-agent gemini     # overrides the profile for this run
 ```
+
+`uv run python main.py` remains available when working from the repository.
 
 Example session:
 

@@ -4,6 +4,7 @@ models/
 pgdata/
 .env
 *.pyc
+*.egg-info/
 NOTES.md
 ROADMAP.md
 SUMMARY.md

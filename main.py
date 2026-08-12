@@ -185,5 +185,10 @@ async def main() -> None:
         await run_agent_loop(messages, config)
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Run the agent through the installed ``personal-agent`` command."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli()

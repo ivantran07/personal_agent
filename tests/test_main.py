@@ -7,7 +7,7 @@ awaited with via `mock_run_agent_loop.call_args` / `.await_args_list`.
 """
 
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from conftest import StopLoop
@@ -42,6 +42,21 @@ def base_config():
         "system_prompt": None,
         "max_iterations": 5,
     }
+
+
+def test_cli_runs_async_main(monkeypatch):
+    """The synchronous console entry point delegates to asyncio.run(main())."""
+
+    async def fake_main() -> None:
+        pass
+
+    mock_run = Mock(side_effect=lambda coroutine: coroutine.close())
+    monkeypatch.setattr(main, "main", fake_main)
+    monkeypatch.setattr(main.asyncio, "run", mock_run)
+
+    main.cli()
+
+    mock_run.assert_called_once()
 
 
 async def test_default_profile_used_when_no_argv(
