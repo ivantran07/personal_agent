@@ -22,6 +22,8 @@ RESET = "\033[0m"
 litellm.suppress_debug_info = True
 
 CONFIRM_TOOLS = {"delete_file", "remove_directory"}
+RETRY_DELAYS = (1, 2, 4, 8, 16, 32)
+RETRYABLE_API_STATUS_CODES = {408, 409, 429}
 
 
 async def run_tool_call(tool: ChatCompletionMessageToolCall) -> dict[str, str]:
@@ -91,46 +93,122 @@ async def run_agent_loop(
 ) -> None:
     """Handle one user prompt and its model/tool exchange.
 
-    Streams the model response, retries a response cut off by the token limit,
-    and continues executing tool calls until the model produces a final reply
-    or the configured iteration limit is reached.
+    Streams the model response, retries transient API failures and responses
+    cut off by the token limit, and continues executing tool calls until the
+    model produces a final reply or the configured iteration limit is reached.
     """
     user_prompt = input(f"{GREEN}USER{RESET}: ")
     messages.append({"role": "user", "content": user_prompt})
     model_shown = False
+    completion_candidates = [config["model"], *(config.get("fallbacks") or [])]
 
     for _ in range(config["max_iterations"]):
-        response = await acompletion(
-            model=config["model"],
-            messages=messages,
-            max_completion_tokens=config["max_completion_tokens"],
-            tools=TOOL_SCHEMAS,
-            fallbacks=config.get("fallbacks", []),
-            api_base=config.get("api_base"),
-            api_key=config.get("api_key"),
-            stream=True,
-        )
+        completed_chunks = None
+        last_error = None
 
-        print(f"{GREEN}MODEL{RESET}:")
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            for candidate_index, candidate in enumerate(completion_candidates):
+                completion_kwargs = {
+                    "model": candidate,
+                    "messages": messages,
+                    "max_completion_tokens": config["max_completion_tokens"],
+                    "tools": TOOL_SCHEMAS,
+                    "api_base": config.get("api_base"),
+                    "api_key": config.get("api_key"),
+                    "stream": True,
+                    "max_retries": 0,
+                    "num_retries": 0,
+                }
 
-        chunks = []
-        async for chunk in response:
-            if not model_shown:
-                model_shown = True
-                print(f"{YELLOW}MODEL: {response.model}{RESET}")
+                retry_error = None
+                try:
+                    response = await acompletion(**completion_kwargs)
+                    print(f"{GREEN}MODEL{RESET}:")
 
-            chunks.append(chunk)
+                    chunks = []
+                    async for chunk in response:
+                        if not model_shown:
+                            model_shown = True
+                            print(f"{YELLOW}MODEL: {response.model}{RESET}")
 
-            if not chunk.choices:
-                continue
+                        chunks.append(chunk)
 
-            delta = chunk.choices[0].delta
-            if not delta or not delta.content:
-                continue
+                        if not chunk.choices:
+                            continue
 
-            print(delta.content, end="", flush=True)
+                        delta = chunk.choices[0].delta
+                        if not delta or not delta.content:
+                            continue
 
-        print()
+                        print(delta.content, end="", flush=True)
+
+                    print()
+                # Separate clauses keep every retryable LiteLLM failure explicit.
+                except litellm.RateLimitError as error:
+                    retry_error = error
+                except litellm.Timeout as error:
+                    retry_error = error
+                except litellm.APIConnectionError as error:
+                    retry_error = error
+                except litellm.InternalServerError as error:
+                    retry_error = error
+                except litellm.BadGatewayError as error:
+                    retry_error = error
+                except litellm.ServiceUnavailableError as error:
+                    retry_error = error
+                except litellm.APIError as error:
+                    status_code = getattr(error, "status_code", None)
+                    if not (
+                        isinstance(status_code, int)
+                        and (
+                            status_code in RETRYABLE_API_STATUS_CODES
+                            or status_code >= 500
+                        )
+                    ):
+                        print(
+                            f"\n{RED}NON-RETRYABLE API FAILURE{RESET}: "
+                            f"{type(error).__name__} for model "
+                            f"{completion_kwargs['model']}: {error}"
+                        )
+                        raise
+                    retry_error = error
+                else:
+                    completed_chunks = chunks
+                    break
+
+                last_error = retry_error
+                print(
+                    f"\n{RED}API FAILURE{RESET}: {type(retry_error).__name__} "
+                    f"for model {completion_kwargs['model']} on attempt "
+                    f"{attempt + 1}/{len(RETRY_DELAYS) + 1}: {retry_error}"
+                )
+
+                if candidate_index < len(completion_candidates) - 1:
+                    print(f"{YELLOW}FALLBACK{RESET}: Trying the next configured model")
+
+            if completed_chunks is not None:
+                break
+
+            if attempt == len(RETRY_DELAYS):
+                print(
+                    f"{RED}API FAILURE{RESET}: All "
+                    f"{len(RETRY_DELAYS) + 1} attempts exhausted; aborting"
+                )
+                if last_error is None:
+                    raise RuntimeError("Completion failed without an API exception")
+                raise last_error
+
+            delay = RETRY_DELAYS[attempt]
+            print(
+                f"{YELLOW}RETRY{RESET}: All configured models failed; "
+                f"retrying in {delay} seconds"
+            )
+            await asyncio.sleep(delay)
+
+        if completed_chunks is None:
+            raise RuntimeError("Completion retry loop ended without a response")
+
+        chunks = completed_chunks
 
         rebuilt_response = litellm.stream_chunk_builder(chunks, messages=messages)
 

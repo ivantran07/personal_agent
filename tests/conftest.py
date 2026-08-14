@@ -38,14 +38,17 @@ class FakeMessage:
 class FakeStream:
     """Async iterable stand-in for LiteLLM's streaming response wrapper."""
 
-    def __init__(self, model, chunks):
+    def __init__(self, model, chunks, iteration_error=None):
         self.model = model
         self._chunks = chunks
+        self._iteration_error = iteration_error
 
     def __aiter__(self):
         async def iterate():
             for chunk in self._chunks:
                 yield chunk
+            if self._iteration_error is not None:
+                raise self._iteration_error
 
         return iterate()
 
@@ -145,13 +148,13 @@ def fake_chunk_factory():
 
 @pytest.fixture
 def fake_stream_factory(fake_chunk_factory):
-    """Create an async stream whose chunks rebuild to ``response`` in tests."""
+    """Create a rebuildable async stream with an optional iteration failure."""
 
-    def _make(response, model="test-model", chunks=None):
+    def _make(response, model="test-model", chunks=None, iteration_error=None):
         chunks = chunks or [fake_chunk_factory()]
         for chunk in chunks:
             chunk.final_response = response
-        return FakeStream(model, chunks)
+        return FakeStream(model, chunks, iteration_error)
 
     return _make
 
@@ -190,6 +193,14 @@ def mock_acompletion(monkeypatch):
     """
     mock = AsyncMock()
     monkeypatch.setattr("main.acompletion", mock)
+    return mock
+
+
+@pytest.fixture
+def mock_retry_sleep(monkeypatch) -> AsyncMock:
+    """Patch retry sleeps so backoff tests run without real delays."""
+    mock = AsyncMock()
+    monkeypatch.setattr("main.asyncio.sleep", mock)
     return mock
 
 

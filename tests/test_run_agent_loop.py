@@ -1,4 +1,9 @@
-"""Tests for the async streaming behavior of ``main.run_agent_loop``."""
+"""Tests for streaming and retry behavior in ``main.run_agent_loop``."""
+
+from unittest.mock import call
+
+import litellm
+import pytest
 
 import main
 
@@ -10,6 +15,25 @@ def config(**overrides):
         "max_iterations": 5,
         **overrides,
     }
+
+
+def make_transient_error(error_type: type[Exception]) -> Exception:
+    """Construct a transient LiteLLM exception with required request context."""
+    return error_type(
+        message="temporary API failure",
+        llm_provider="test-provider",
+        model="test-model",
+    )
+
+
+def make_api_error(status_code: int) -> litellm.APIError:
+    """Construct a generic LiteLLM API error for status classification tests."""
+    return litellm.APIError(
+        status_code=status_code,
+        message=f"API failure with status {status_code}",
+        llm_provider="test-provider",
+        model="test-model",
+    )
 
 
 async def test_prompt_is_appended_and_loop_stops_without_tool_calls(
@@ -197,7 +221,8 @@ async def test_acompletion_uses_streaming_and_expected_configuration(
     fake_message_factory,
     fake_response_factory,
     fake_stream_factory,
-):
+) -> None:
+    """Disable LiteLLM retries while passing the expected request settings."""
     mock_input.side_effect = None
     mock_input.return_value = "hello"
     message = fake_message_factory(content="done")
@@ -215,8 +240,193 @@ async def test_acompletion_uses_streaming_and_expected_configuration(
         "messages": [{"role": "user", "content": "hello"}, message.model_dump()],
         "max_completion_tokens": 100,
         "tools": main.TOOL_SCHEMAS,
-        "fallbacks": ["backup-model"],
         "api_base": "https://example.test",
         "api_key": "secret",
         "stream": True,
+        "max_retries": 0,
+        "num_retries": 0,
     }
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        pytest.param(litellm.RateLimitError, id="rate-limit"),
+        pytest.param(litellm.Timeout, id="timeout"),
+        pytest.param(litellm.APIConnectionError, id="connection"),
+        pytest.param(litellm.InternalServerError, id="internal-server"),
+        pytest.param(litellm.BadGatewayError, id="bad-gateway"),
+        pytest.param(litellm.ServiceUnavailableError, id="service-unavailable"),
+    ],
+)
+async def test_transient_litellm_errors_retry_after_backoff(
+    error_type,
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+    fake_message_factory,
+    fake_response_factory,
+    fake_stream_factory,
+) -> None:
+    """Retry each explicitly supported transient LiteLLM exception."""
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    message = fake_message_factory(content="recovered")
+    mock_acompletion.side_effect = [
+        make_transient_error(error_type),
+        fake_stream_factory(fake_response_factory(message=message)),
+    ]
+
+    messages = []
+    await main.run_agent_loop(messages, config())
+
+    assert mock_acompletion.await_count == 2
+    mock_retry_sleep.assert_awaited_once_with(1)
+    assert messages[-1] == message.model_dump()
+
+
+@pytest.mark.parametrize("status_code", [408, 409, 429, 500, 599])
+async def test_retryable_api_statuses_retry_after_backoff(
+    status_code,
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+    fake_message_factory,
+    fake_response_factory,
+    fake_stream_factory,
+) -> None:
+    """Retry transient API status codes and server errors."""
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    message = fake_message_factory(content="recovered")
+    mock_acompletion.side_effect = [
+        make_api_error(status_code),
+        fake_stream_factory(fake_response_factory(message=message)),
+    ]
+
+    await main.run_agent_loop([], config())
+
+    assert mock_acompletion.await_count == 2
+    mock_retry_sleep.assert_awaited_once_with(1)
+
+
+@pytest.mark.parametrize("status_code", [400, 401, 499])
+async def test_non_retryable_api_status_fails_immediately(
+    status_code,
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+) -> None:
+    """Propagate permanent API errors without sleeping or trying fallbacks."""
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    error = make_api_error(status_code)
+    mock_acompletion.side_effect = error
+
+    with pytest.raises(litellm.APIError) as exc_info:
+        await main.run_agent_loop([], config(fallbacks=["backup-model"]))
+
+    assert exc_info.value is error
+    assert mock_acompletion.await_count == 1
+    mock_retry_sleep.assert_not_awaited()
+    assert [item.kwargs["model"] for item in mock_acompletion.await_args_list] == [
+        "test-model"
+    ]
+
+
+async def test_stream_failure_retries_with_fresh_completion(
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+    mock_stream_chunk_builder,
+    fake_chunk_factory,
+    fake_message_factory,
+    fake_response_factory,
+    fake_stream_factory,
+) -> None:
+    """Discard partial chunks and retry API failures raised during streaming."""
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    partial_chunk = fake_chunk_factory(content="partial")
+    successful_chunk = fake_chunk_factory(content="complete")
+    final_message = fake_message_factory(content="complete")
+    mock_acompletion.side_effect = [
+        fake_stream_factory(
+            fake_response_factory(message=fake_message_factory(content="partial")),
+            chunks=[partial_chunk],
+            iteration_error=make_transient_error(litellm.APIConnectionError),
+        ),
+        fake_stream_factory(
+            fake_response_factory(message=final_message), chunks=[successful_chunk]
+        ),
+    ]
+
+    messages = []
+    await main.run_agent_loop(messages, config())
+
+    assert mock_acompletion.await_count == 2
+    mock_retry_sleep.assert_awaited_once_with(1)
+    mock_stream_chunk_builder.assert_called_once()
+    assert mock_stream_chunk_builder.call_args.args[0] == [successful_chunk]
+    assert messages[-1] == final_message.model_dump()
+
+
+async def test_fallback_models_are_tried_before_sleeping(
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+    fake_message_factory,
+    fake_response_factory,
+    fake_stream_factory,
+) -> None:
+    """Try every configured model before backing off and restarting the sequence."""
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    final_message = fake_message_factory(content="recovered")
+    mock_acompletion.side_effect = [
+        make_transient_error(litellm.Timeout),
+        make_transient_error(litellm.Timeout),
+        fake_stream_factory(fake_response_factory(message=final_message)),
+    ]
+
+    await main.run_agent_loop([], config(fallbacks=["backup-model"]))
+
+    assert [item.kwargs["model"] for item in mock_acompletion.await_args_list] == [
+        "test-model",
+        "backup-model",
+        "test-model",
+    ]
+    mock_retry_sleep.assert_awaited_once_with(1)
+
+
+async def test_retry_exhaustion_uses_full_backoff_and_reraises_last_error(
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+) -> None:
+    """Use the 1/2/4/8/16/32 schedule and re-raise the final API failure."""
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    errors = [
+        litellm.Timeout(
+            message=f"temporary API failure {attempt}",
+            llm_provider="test-provider",
+            model="test-model",
+        )
+        for attempt in range(7)
+    ]
+    mock_acompletion.side_effect = errors
+
+    with pytest.raises(litellm.Timeout) as exc_info:
+        await main.run_agent_loop([], config())
+
+    assert exc_info.value is errors[-1]
+    assert mock_acompletion.await_count == 7
+    assert mock_retry_sleep.await_args_list == [
+        call(1),
+        call(2),
+        call(4),
+        call(8),
+        call(16),
+        call(32),
+    ]
