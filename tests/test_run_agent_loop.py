@@ -144,8 +144,12 @@ async def test_length_finish_reason_retries_without_appending_assistant_message(
     assert messages[-1] == final_message.model_dump()
 
 
-async def test_empty_rebuilt_choices_prints_message_and_returns(
-    mock_input, mock_acompletion, fake_response_factory, fake_stream_factory, capsys
+async def test_empty_rebuilt_choices_logs_error_and_returns(
+    mock_input,
+    mock_acompletion,
+    fake_response_factory,
+    fake_stream_factory,
+    mock_logger,
 ):
     mock_input.side_effect = None
     mock_input.return_value = "hello"
@@ -155,7 +159,7 @@ async def test_empty_rebuilt_choices_prints_message_and_returns(
 
     await main.run_agent_loop([], config())
 
-    assert "No choices" in capsys.readouterr().out
+    mock_logger.error.assert_called_once_with("llm.response.empty")
 
 
 async def test_streamed_content_is_printed_chunk_by_chunk(
@@ -191,7 +195,7 @@ async def test_streamed_content_is_printed_chunk_by_chunk(
     assert (("lo",), {"end": "", "flush": True}) in printed
 
 
-async def test_max_iterations_prints_message_for_repeated_tool_calls(
+async def test_max_iterations_logs_warning_for_repeated_tool_calls(
     mock_input,
     mock_acompletion,
     fake_message_factory,
@@ -199,7 +203,7 @@ async def test_max_iterations_prints_message_for_repeated_tool_calls(
     fake_stream_factory,
     patched_tools,
     tool_call_factory,
-    capsys,
+    mock_logger,
 ):
     mock_input.side_effect = None
     mock_input.return_value = "hello"
@@ -212,7 +216,9 @@ async def test_max_iterations_prints_message_for_repeated_tool_calls(
     await main.run_agent_loop([], config(max_iterations=3))
 
     assert mock_acompletion.await_count == 3
-    assert "Max iterations reached without a final answer" in capsys.readouterr().out
+    mock_logger.warning.assert_called_once_with(
+        "agent.max_iterations", extra={"max_iterations": 3}
+    )
 
 
 async def test_acompletion_uses_streaming_and_expected_configuration(
@@ -375,6 +381,7 @@ async def test_fallback_models_are_tried_before_sleeping(
     mock_input,
     mock_acompletion,
     mock_retry_sleep,
+    mock_logger,
     fake_message_factory,
     fake_response_factory,
     fake_stream_factory,
@@ -397,12 +404,28 @@ async def test_fallback_models_are_tried_before_sleeping(
         "test-model",
     ]
     mock_retry_sleep.assert_awaited_once_with(1)
+    warning_events = [item.args[0] for item in mock_logger.warning.call_args_list]
+    assert warning_events == [
+        "llm.request.failed",
+        "llm.fallback.selected",
+        "llm.request.failed",
+        "llm.retry.scheduled",
+    ]
+    fallback_metadata = mock_logger.warning.call_args_list[1].kwargs["extra"]
+    assert fallback_metadata == {
+        "model": "test-model",
+        "next_model": "backup-model",
+    }
+    retry_metadata = mock_logger.warning.call_args_list[-1].kwargs["extra"]
+    assert retry_metadata == {"attempt": 2, "delay_seconds": 1}
+    assert "temporary API failure" not in repr(mock_logger.method_calls)
 
 
 async def test_retry_exhaustion_uses_full_backoff_and_reraises_last_error(
     mock_input,
     mock_acompletion,
     mock_retry_sleep,
+    mock_logger,
 ) -> None:
     """Use the 1/2/4/8/16/32 schedule and re-raise the final API failure."""
     mock_input.side_effect = None
@@ -430,3 +453,7 @@ async def test_retry_exhaustion_uses_full_backoff_and_reraises_last_error(
         call(16),
         call(32),
     ]
+    mock_logger.error.assert_called_once_with(
+        "llm.retries_exhausted", extra={"max_attempts": 7}
+    )
+    assert "temporary API failure" not in repr(mock_logger.method_calls)

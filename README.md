@@ -56,6 +56,7 @@ Fill in `.env` with whichever API key(s) your chosen profile needs (see [Configu
 | `MAX_READ_BYTES` | Max size for `read_file`/`grep` | `1000000` |
 | `MAX_FETCH_BYTES` | Max response size for `fetch_url` | `2000000` |
 | `REQUEST_TIMEOUT` | Timeout (seconds) for `fetch_url` | `15` |
+| `LOG_LEVEL` | Minimum structured log level | `INFO` |
 
 ### Model profiles (`config.yaml`)
 
@@ -81,18 +82,30 @@ Example session:
 ```
 USER: what's in the current directory, and what's 47 * 89?
 MODEL: gpt-oss-120b
-TOOL: list_files returned with arguments {}
-TOOL: multiply returned with arguments {"a": 47, "b": 89}
+{"timestamp":"...","level":"INFO","logger":"personal_agent.main","event":"tool.completed","tool_name":"list_files"}
+{"timestamp":"...","level":"INFO","logger":"personal_agent.main","event":"tool.completed","tool_name":"multiply"}
 MODEL: The current directory contains notes.txt and draft.md. 47 * 89 = 4183.
 ```
+
+Operational events are emitted as one JSON object per line on stderr, while
+prompts and streamed model output remain on stdout. Logs contain operation
+metadata, registered tool names, configured model/profile identifiers, and
+sanitized traceback locations. They do not contain prompts, unknown
+model-generated tool names, tool arguments, results, user-provided paths,
+URLs, or exception messages. Set
+`LOG_LEVEL=DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` to control
+verbosity.
 
 Destructive actions pause for confirmation before running:
 
 ```
 MODEL: I'll delete the temp file now.
 VALIDATION: Run delete_file with arguments {"path": "temp.txt"}? Type 'yes' to confirm: yes
-TOOL: delete_file returned with arguments {"path": "temp.txt"}
+{"timestamp":"...","level":"INFO","logger":"personal_agent.main","event":"tool.completed","tool_name":"delete_file"}
 ```
+
+Declined destructive actions emit a `tool.cancelled` event without their
+arguments.
 
 ## Available Tools
 

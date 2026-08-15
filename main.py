@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import sys
 from typing import Any
 
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 from litellm import ModelResponse, acompletion
 from litellm.types.utils import ChatCompletionMessageToolCall, Message
 
+from logging_config import configure_logging, exception_metadata
 from tools import TOOL_SCHEMAS, TOOLS
 
 RED = "\033[91m"
@@ -25,6 +27,8 @@ CONFIRM_TOOLS = {"delete_file", "remove_directory"}
 RETRY_DELAYS = (1, 2, 4, 8, 16, 32)
 RETRYABLE_API_STATUS_CODES = {408, 409, 429}
 
+logger = logging.getLogger("personal_agent.main")
+
 
 async def run_tool_call(tool: ChatCompletionMessageToolCall) -> dict[str, str]:
     """Execute one model-requested tool call and return its chat message result.
@@ -37,20 +41,21 @@ async def run_tool_call(tool: ChatCompletionMessageToolCall) -> dict[str, str]:
 
     if name not in TOOLS:
         tool_content = f"Tool {name} does not exist. The list of available tools are {list(TOOLS.keys())}"
-        print(f"{RED}TOOL{RESET}: {name} does not exist")
+        logger.warning("tool.unknown")
     else:
         try:
             arguments = json.loads(string_arguments)
             tool_content = str(
                 await asyncio.to_thread(TOOLS[name]["function"], **arguments)
             )
-            print(
-                f"{GREEN}TOOL{RESET}: {name} returned with arguments {string_arguments}"
-            )
+            logger.info("tool.completed", extra={"tool_name": name})
 
         except Exception as e:  # noqa: BLE001 - tool dispatcher must survive arbitrary tool failures
             tool_content = f"An exception occured: {e}. Try differently."
-            print(f"{RED}TOOL{RESET}: {name} failed with arguments {string_arguments}")
+            logger.error(
+                "tool.failed",
+                extra={"tool_name": name, **exception_metadata(e)},
+            )
 
     return {"tool_call_id": tool.id, "role": "tool", "content": tool_content}
 
@@ -70,7 +75,7 @@ async def run_tool_calls(message: Message) -> list[dict[str, str]]:
                 f"{tool.function.arguments}? Type 'yes' to confirm: "
             )
             if answer.strip().lower() != "yes":
-                print(f"{RED}TOOL{RESET}: {tool.function.name} cancelled by user")
+                logger.info("tool.cancelled", extra={"tool_name": tool.function.name})
                 tool_results.append(
                     {
                         "tool_call_id": tool.id,
@@ -165,10 +170,13 @@ async def run_agent_loop(
                             or status_code >= 500
                         )
                     ):
-                        print(
-                            f"\n{RED}NON-RETRYABLE API FAILURE{RESET}: "
-                            f"{type(error).__name__} for model "
-                            f"{completion_kwargs['model']}: {error}"
+                        logger.error(
+                            "llm.request.failed",
+                            extra={
+                                "model": completion_kwargs["model"],
+                                "status_code": status_code,
+                                **exception_metadata(error),
+                            },
                         )
                         raise
                     retry_error = error
@@ -176,32 +184,46 @@ async def run_agent_loop(
                     completed_chunks = chunks
                     break
 
+                if retry_error is None:
+                    raise RuntimeError("Completion failed without an API exception")
+
                 last_error = retry_error
-                print(
-                    f"\n{RED}API FAILURE{RESET}: {type(retry_error).__name__} "
-                    f"for model {completion_kwargs['model']} on attempt "
-                    f"{attempt + 1}/{len(RETRY_DELAYS) + 1}: {retry_error}"
+                logger.warning(
+                    "llm.request.failed",
+                    extra={
+                        "model": completion_kwargs["model"],
+                        "attempt": attempt + 1,
+                        "max_attempts": len(RETRY_DELAYS) + 1,
+                        "status_code": getattr(retry_error, "status_code", None),
+                        **exception_metadata(retry_error),
+                    },
                 )
 
                 if candidate_index < len(completion_candidates) - 1:
-                    print(f"{YELLOW}FALLBACK{RESET}: Trying the next configured model")
+                    logger.warning(
+                        "llm.fallback.selected",
+                        extra={
+                            "model": candidate,
+                            "next_model": completion_candidates[candidate_index + 1],
+                        },
+                    )
 
             if completed_chunks is not None:
                 break
 
             if attempt == len(RETRY_DELAYS):
-                print(
-                    f"{RED}API FAILURE{RESET}: All "
-                    f"{len(RETRY_DELAYS) + 1} attempts exhausted; aborting"
+                logger.error(
+                    "llm.retries_exhausted",
+                    extra={"max_attempts": len(RETRY_DELAYS) + 1},
                 )
                 if last_error is None:
                     raise RuntimeError("Completion failed without an API exception")
                 raise last_error
 
             delay = RETRY_DELAYS[attempt]
-            print(
-                f"{YELLOW}RETRY{RESET}: All configured models failed; "
-                f"retrying in {delay} seconds"
+            logger.warning(
+                "llm.retry.scheduled",
+                extra={"attempt": attempt + 2, "delay_seconds": delay},
             )
             await asyncio.sleep(delay)
 
@@ -213,11 +235,11 @@ async def run_agent_loop(
         rebuilt_response = litellm.stream_chunk_builder(chunks, messages=messages)
 
         if not isinstance(rebuilt_response, ModelResponse):
-            print("No chat-completion response")
+            logger.error("llm.response.invalid")
             return
 
         if not rebuilt_response.choices:
-            print("No choices")
+            logger.error("llm.response.empty")
             return
 
         if rebuilt_response.choices[0].finish_reason == "length":
@@ -239,12 +261,16 @@ async def run_agent_loop(
         messages.extend(tool_results)
 
     else:
-        print(f"{YELLOW}Max iterations reached without a final answer{RESET}")
+        logger.warning(
+            "agent.max_iterations",
+            extra={"max_iterations": config["max_iterations"]},
+        )
 
 
 async def main() -> None:
     """Load configuration and run consecutive interactive agent turns."""
     load_dotenv()
+    configure_logging()
 
     with open("config.yaml", encoding="utf8") as f:  # noqa: ASYNC230 - one-time startup read, before event loop has any contention
         config = yaml.safe_load(f)
@@ -252,6 +278,7 @@ async def main() -> None:
     profile_name = sys.argv[1] if len(sys.argv) > 1 else config["active_profile"]
     profile = config["profiles"][profile_name]
     config = {**config, **profile}
+    logger.info("app.started", extra={"profile": profile_name})
 
     messages = []
 
@@ -265,7 +292,13 @@ async def main() -> None:
 
 def cli() -> None:
     """Run the agent through the installed ``personal-agent`` command."""
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (EOFError, KeyboardInterrupt) as error:
+        logger.info("app.stopped", extra={"reason": type(error).__name__})
+    except Exception as error:  # noqa: BLE001 - process boundary logs all fatal failures
+        logger.critical("app.failed", extra=exception_metadata(error))
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ StopLoop sentinel exception, and inspects the (messages, config) args it was
 awaited with via `mock_run_agent_loop.call_args` / `.await_args_list`.
 """
 
+import json
+import logging
 import sys
 from unittest.mock import AsyncMock, Mock
 
@@ -13,6 +15,7 @@ import pytest
 from conftest import StopLoop
 
 import main
+from logging_config import LOGGER_NAMESPACE
 
 
 @pytest.fixture
@@ -57,6 +60,51 @@ def test_cli_runs_async_main(monkeypatch):
     main.cli()
 
     mock_run.assert_called_once()
+
+
+def test_cli_logs_graceful_eof_shutdown(monkeypatch, mock_logger):
+    """EOF exits cleanly and records a metadata-only shutdown reason."""
+
+    async def fake_main() -> None:
+        pass
+
+    def raise_eof(coroutine):
+        coroutine.close()
+        raise EOFError
+
+    monkeypatch.setattr(main, "main", fake_main)
+    monkeypatch.setattr(main.asyncio, "run", raise_eof)
+
+    main.cli()
+
+    mock_logger.info.assert_called_once_with(
+        "app.stopped", extra={"reason": "EOFError"}
+    )
+
+
+def test_invalid_log_level_fails_with_structured_json(monkeypatch, capsys):
+    """Logging configuration failures still reach the JSON process boundary."""
+    invalid_level = "secret-invalid-level"
+    monkeypatch.setenv("LOG_LEVEL", invalid_level)
+
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            main.cli()
+
+        assert exc_info.value.code == 1
+        output = capsys.readouterr().err
+        record = json.loads(output)
+        assert record["level"] == "CRITICAL"
+        assert record["event"] == "app.failed"
+        assert record["error_type"] == "ValueError"
+        assert invalid_level not in output
+    finally:
+        app_logger = logging.getLogger(LOGGER_NAMESPACE)
+        for handler in app_logger.handlers[:]:
+            app_logger.removeHandler(handler)
+            handler.close()
+        app_logger.setLevel(logging.NOTSET)
+        app_logger.propagate = True
 
 
 async def test_default_profile_used_when_no_argv(

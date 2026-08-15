@@ -197,6 +197,14 @@ def mock_acompletion(monkeypatch):
 
 
 @pytest.fixture
+def mock_logger(monkeypatch):
+    """Replace the application logger with a fresh mock."""
+    mock = Mock()
+    monkeypatch.setattr("main.logger", mock)
+    return mock
+
+
+@pytest.fixture
 def mock_retry_sleep(monkeypatch) -> AsyncMock:
     """Patch retry sleeps so backoff tests run without real delays."""
     mock = AsyncMock()

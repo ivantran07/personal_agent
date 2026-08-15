@@ -81,7 +81,12 @@ async def test_confirmed_tool_runs(
 
 
 async def test_declined_tool_does_not_run(
-    confirm_tools, patched_tools, tool_call_factory, fake_message_factory, mock_input
+    confirm_tools,
+    patched_tools,
+    tool_call_factory,
+    fake_message_factory,
+    mock_input,
+    mock_logger,
 ):
     """Case 4: a CONFIRM_TOOLS tool + input() returning "no" -> tool function
     never called; result is exactly the cancellation message dict.
@@ -111,6 +116,10 @@ async def test_declined_tool_does_not_run(
             "content": "Action cancelled: user did not confirm",
         }
     ]
+    mock_logger.info.assert_called_once_with(
+        "tool.cancelled", extra={"tool_name": "add"}
+    )
+    assert '{"x": 1, "y": 2}' not in repr(mock_logger.info.call_args)
 
 
 @pytest.mark.parametrize("answer", ["yes", "Yes", " yes \n", "YES"])
