@@ -28,10 +28,23 @@ class FakeMessage:
         self.tool_calls = tool_calls
 
     def model_dump(self):
+        tool_calls = None
+        if self.tool_calls is not None:
+            tool_calls = [
+                {
+                    "id": tool.id,
+                    "type": "function",
+                    "function": {
+                        "name": tool.function.name,
+                        "arguments": tool.function.arguments,
+                    },
+                }
+                for tool in self.tool_calls
+            ]
         return {
             "role": "assistant",
             "content": self.content,
-            "tool_calls": self.tool_calls,
+            "tool_calls": tool_calls,
         }
 
 

@@ -1,6 +1,6 @@
 """Tests for streaming and retry behavior in ``main.run_agent_loop``."""
 
-from unittest.mock import call
+from unittest.mock import AsyncMock, call
 
 import litellm
 import pytest
@@ -13,6 +13,14 @@ def config(**overrides):
         "model": "test-model",
         "max_completion_tokens": 100,
         "max_iterations": 5,
+        "context_trigger_ratio": 0.85,
+        "context_target_ratio": 0.60,
+        "context_safety_tokens": 10,
+        "compaction_max_completion_tokens": 50,
+        "context_window_overrides": {
+            "test-model": 100000,
+            "backup-model": 100000,
+        },
         **overrides,
     }
 
@@ -243,12 +251,13 @@ async def test_acompletion_uses_streaming_and_expected_configuration(
 
     assert mock_acompletion.call_args.kwargs == {
         "model": "test-model",
-        "messages": [{"role": "user", "content": "hello"}, message.model_dump()],
+        "messages": [{"role": "user", "content": "hello"}],
         "max_completion_tokens": 100,
         "tools": main.TOOL_SCHEMAS,
         "api_base": "https://example.test",
         "api_key": "secret",
         "stream": True,
+        "stream_options": {"include_usage": True},
         "max_retries": 0,
         "num_retries": 0,
     }
@@ -375,6 +384,72 @@ async def test_stream_failure_retries_with_fresh_completion(
     mock_stream_chunk_builder.assert_called_once()
     assert mock_stream_chunk_builder.call_args.args[0] == [successful_chunk]
     assert messages[-1] == final_message.model_dump()
+
+
+async def test_context_overflow_forces_compaction_without_backoff(
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+    fake_message_factory,
+    fake_response_factory,
+    fake_stream_factory,
+    monkeypatch,
+) -> None:
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    overflow = litellm.ContextWindowExceededError(
+        message="too long", model="test-model", llm_provider="test-provider"
+    )
+    final_message = fake_message_factory(content="recovered")
+    mock_acompletion.side_effect = [
+        overflow,
+        fake_stream_factory(fake_response_factory(message=final_message)),
+    ]
+    preflight = AsyncMock(
+        side_effect=lambda messages, *_args, **_kwargs: list(messages)
+    )
+    monkeypatch.setattr(main, "preflight_messages", preflight)
+
+    await main.run_agent_loop([], config())
+
+    assert mock_acompletion.await_count == 2
+    assert preflight.await_count == 2
+    assert preflight.await_args_list[1].kwargs == {"force_compaction": True}
+    mock_retry_sleep.assert_not_awaited()
+
+
+async def test_transient_preflight_failure_uses_fallback_before_backoff(
+    mock_input,
+    mock_acompletion,
+    mock_retry_sleep,
+    fake_message_factory,
+    fake_response_factory,
+    fake_stream_factory,
+    monkeypatch,
+) -> None:
+    mock_input.side_effect = None
+    mock_input.return_value = "hello"
+    final_message = fake_message_factory(content="recovered")
+    preflight = AsyncMock(
+        side_effect=[
+            make_transient_error(litellm.Timeout),
+            [{"role": "user", "content": "hello"}],
+        ]
+    )
+    monkeypatch.setattr(main, "preflight_messages", preflight)
+    mock_acompletion.return_value = fake_stream_factory(
+        fake_response_factory(message=final_message)
+    )
+
+    await main.run_agent_loop([], config(fallbacks=["backup-model"]))
+
+    assert [item.args[1] for item in preflight.await_args_list] == [
+        "test-model",
+        "backup-model",
+    ]
+    assert mock_acompletion.await_count == 1
+    assert mock_acompletion.call_args.kwargs["model"] == "backup-model"
+    mock_retry_sleep.assert_not_awaited()
 
 
 async def test_fallback_models_are_tried_before_sleeping(

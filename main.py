@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from litellm import ModelResponse, acompletion
 from litellm.types.utils import ChatCompletionMessageToolCall, Message
 
+from compaction import log_usage, preflight_messages
 from logging_config import configure_logging, exception_metadata
 from tools import TOOL_SCHEMAS, TOOLS
 
@@ -93,6 +94,29 @@ async def run_tool_calls(message: Message) -> list[dict[str, str]]:
     return tool_results
 
 
+async def _stream_completion(
+    completion_kwargs: dict[str, Any], model_shown: bool
+) -> tuple[list[Any], bool]:
+    """Submit and print one streamed completion while retaining every chunk."""
+    response = await acompletion(**completion_kwargs)
+    print(f"{GREEN}MODEL{RESET}:")
+    chunks = []
+    async for chunk in response:
+        if not model_shown:
+            model_shown = True
+            print(f"{YELLOW}MODEL: {response.model}{RESET}")
+
+        chunks.append(chunk)
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        if not delta or not delta.content:
+            continue
+        print(delta.content, end="", flush=True)
+    print()
+    return chunks, model_shown
+
+
 async def run_agent_loop(
     messages: list[dict[str, Any]], config: dict[str, Any]
 ) -> None:
@@ -113,75 +137,79 @@ async def run_agent_loop(
 
         for attempt in range(len(RETRY_DELAYS) + 1):
             for candidate_index, candidate in enumerate(completion_candidates):
-                completion_kwargs = {
-                    "model": candidate,
-                    "messages": messages,
-                    "max_completion_tokens": config["max_completion_tokens"],
-                    "tools": TOOL_SCHEMAS,
-                    "api_base": config.get("api_base"),
-                    "api_key": config.get("api_key"),
-                    "stream": True,
-                    "max_retries": 0,
-                    "num_retries": 0,
-                }
-
                 retry_error = None
-                try:
-                    response = await acompletion(**completion_kwargs)
-                    print(f"{GREEN}MODEL{RESET}:")
-
-                    chunks = []
-                    async for chunk in response:
-                        if not model_shown:
-                            model_shown = True
-                            print(f"{YELLOW}MODEL: {response.model}{RESET}")
-
-                        chunks.append(chunk)
-
-                        if not chunk.choices:
-                            continue
-
-                        delta = chunk.choices[0].delta
-                        if not delta or not delta.content:
-                            continue
-
-                        print(delta.content, end="", flush=True)
-
-                    print()
-                # Separate clauses keep every retryable LiteLLM failure explicit.
-                except litellm.RateLimitError as error:
-                    retry_error = error
-                except litellm.Timeout as error:
-                    retry_error = error
-                except litellm.APIConnectionError as error:
-                    retry_error = error
-                except litellm.InternalServerError as error:
-                    retry_error = error
-                except litellm.BadGatewayError as error:
-                    retry_error = error
-                except litellm.ServiceUnavailableError as error:
-                    retry_error = error
-                except litellm.APIError as error:
-                    status_code = getattr(error, "status_code", None)
-                    if not (
-                        isinstance(status_code, int)
-                        and (
-                            status_code in RETRYABLE_API_STATUS_CODES
-                            or status_code >= 500
+                context_recovery_used = False
+                force_compaction = False
+                while True:
+                    try:
+                        request_messages = await preflight_messages(
+                            messages,
+                            candidate,
+                            config,
+                            force_compaction=force_compaction,
                         )
-                    ):
-                        logger.error(
-                            "llm.request.failed",
-                            extra={
-                                "model": completion_kwargs["model"],
-                                "status_code": status_code,
-                                **exception_metadata(error),
-                            },
+                        force_compaction = False
+                        completion_kwargs = {
+                            "model": candidate,
+                            "messages": request_messages,
+                            "max_completion_tokens": config["max_completion_tokens"],
+                            "tools": TOOL_SCHEMAS,
+                            "api_base": config.get("api_base"),
+                            "api_key": config.get("api_key"),
+                            "stream": True,
+                            "stream_options": {"include_usage": True},
+                            "max_retries": 0,
+                            "num_retries": 0,
+                        }
+                        chunks, model_shown = await _stream_completion(
+                            completion_kwargs, model_shown
                         )
-                        raise
-                    retry_error = error
-                else:
-                    completed_chunks = chunks
+                    except litellm.ContextWindowExceededError:
+                        if context_recovery_used:
+                            raise
+                        context_recovery_used = True
+                        force_compaction = True
+                        logger.warning(
+                            "context.provider_overflow", extra={"model": candidate}
+                        )
+                        continue
+                    # Separate clauses keep every retryable LiteLLM failure explicit.
+                    except litellm.RateLimitError as error:
+                        retry_error = error
+                    except litellm.Timeout as error:
+                        retry_error = error
+                    except litellm.APIConnectionError as error:
+                        retry_error = error
+                    except litellm.InternalServerError as error:
+                        retry_error = error
+                    except litellm.BadGatewayError as error:
+                        retry_error = error
+                    except litellm.ServiceUnavailableError as error:
+                        retry_error = error
+                    except litellm.APIError as error:
+                        status_code = getattr(error, "status_code", None)
+                        if not (
+                            isinstance(status_code, int)
+                            and (
+                                status_code in RETRYABLE_API_STATUS_CODES
+                                or status_code >= 500
+                            )
+                        ):
+                            logger.error(
+                                "llm.request.failed",
+                                extra={
+                                    "model": candidate,
+                                    "status_code": status_code,
+                                    **exception_metadata(error),
+                                },
+                            )
+                            raise
+                        retry_error = error
+                    else:
+                        completed_chunks = chunks
+                    break
+
+                if completed_chunks is not None:
                     break
 
                 if retry_error is None:
@@ -191,7 +219,7 @@ async def run_agent_loop(
                 logger.warning(
                     "llm.request.failed",
                     extra={
-                        "model": completion_kwargs["model"],
+                        "model": candidate,
                         "attempt": attempt + 1,
                         "max_attempts": len(RETRY_DELAYS) + 1,
                         "status_code": getattr(retry_error, "status_code", None),
@@ -241,6 +269,8 @@ async def run_agent_loop(
         if not rebuilt_response.choices:
             logger.error("llm.response.empty")
             return
+
+        log_usage(rebuilt_response, candidate, "agent")
 
         if rebuilt_response.choices[0].finish_reason == "length":
             messages.append(

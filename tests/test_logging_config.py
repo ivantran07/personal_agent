@@ -64,3 +64,24 @@ def test_exception_and_unapproved_fields_are_redacted(configured_logger):
         "test_exception_and_unapproved_fields_are_redacted"
     )
     assert isinstance(record["traceback"][-1]["line"], int)
+
+
+def test_usage_fields_are_allowed_but_content_is_redacted(configured_logger):
+    logger, stream = configured_logger
+
+    logger.info(
+        "llm.usage",
+        extra={
+            "request_kind": "agent",
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "content": "do not log this prompt",
+        },
+    )
+
+    record = json.loads(stream.getvalue())
+    assert record["prompt_tokens"] == 100
+    assert record["completion_tokens"] == 20
+    assert record["total_tokens"] == 120
+    assert "content" not in record

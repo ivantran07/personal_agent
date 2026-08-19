@@ -30,6 +30,7 @@ I wanted to learn how agent loops and tool-calling work under the hood — the r
 - **Async, concurrent tool dispatch** — when the model requests multiple tools in one turn, they run concurrently via `asyncio.gather` + `asyncio.to_thread`, instead of one at a time.
 - **Confirm-before-destructive** — tools that mutate data irreversibly (`delete_file`, `remove_directory`) are resolved synchronously with an interactive yes/no prompt *before* any concurrent tool dispatch begins, so confirmation prompts can never interleave with other tool output.
 - **Small, composable tool modules** — file, web, math, and RAG tools each live in their own module under `tools/` and get merged into one registry automatically.
+- **Context-aware conversations** — every model request is token-counted with its tool schemas and output reserve; old complete turns are summarized before they can overflow the selected model's context window.
 
 ## Installation
 
@@ -68,6 +69,22 @@ Fill in `.env` with whichever API key(s) your chosen profile needs (see [Configu
 
 Set `active_profile` in `config.yaml` to pick the default, or pass a profile name as a CLI argument (see below).
 
+Context management uses these top-level settings, which profiles may override:
+
+| Setting | Purpose | Default |
+|---|---|---|
+| `context_trigger_ratio` | Compact when input, output reserve, and safety margin reach this fraction of the context window | `0.85` |
+| `context_target_ratio` | Target utilization after compaction | `0.60` |
+| `context_safety_tokens` | Extra room for tokenizer/provider accounting differences | `512` |
+| `compaction_max_completion_tokens` | Maximum output for the separate summary request | `1024` |
+| `context_window_overrides` | Explicit model-to-context-window mapping when discovery is unavailable | `{}` |
+
+Context limits are resolved from an explicit override first, then provider-native
+metadata (OpenRouter's model catalog or llama.cpp's `/props` endpoint), and then
+LiteLLM's model metadata. Generic or newly released models that cannot be
+resolved require an override. Set `metadata_provider: llamacpp` on a profile to
+enable `/props` discovery for an OpenAI-compatible llama.cpp server.
+
 ## Usage
 
 ```bash
@@ -90,7 +107,7 @@ MODEL: The current directory contains notes.txt and draft.md. 47 * 89 = 4183.
 Operational events are emitted as one JSON object per line on stderr, while
 prompts and streamed model output remain on stdout. Logs contain operation
 metadata, registered tool names, configured model/profile identifiers, and
-sanitized traceback locations. They do not contain prompts, unknown
+provider-reported token usage, and sanitized traceback locations. They do not contain prompts, unknown
 model-generated tool names, tool arguments, results, user-provided paths,
 URLs, or exception messages. Set
 `LOG_LEVEL=DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` to control
@@ -132,12 +149,15 @@ Restricted to `FILES_ROOT` — any path that resolves outside it is rejected.
 
 ## Architecture
 
-Each turn of `run_agent_loop` in `main.py`:
+Each turn of `run_agent_loop` in `main.py`, using context preflight from
+`compaction.py`:
 
-1. Sends the conversation + all tool schemas (`TOOL_SCHEMAS`, merged from every module in `tools/`) to the model via litellm.
-2. If the model requests tool calls, `run_tool_calls` first walks them **sequentially** in the main thread, resolving any that require confirmation (`CONFIRM_TOOLS`). Declined calls short-circuit to a "cancelled" result.
-3. The remaining approved calls run **concurrently**, each dispatched via `asyncio.to_thread` so ordinary blocking tool code doesn't need to be rewritten as async, and gathered with `asyncio.gather`.
-4. Tool results are appended to the conversation and the loop continues until the model returns a final answer or `max_iterations` is hit.
+1. Discovers the candidate model's context limit and counts the complete conversation plus all tool schemas (`TOOL_SCHEMAS`, merged from every module in `tools/`). Completion tokens and a safety margin are reserved before submission.
+2. If the request crosses the configured threshold, old complete turns are replaced atomically by a structured summary while the original system message and active turn remain unchanged. Compaction is a separate, non-streaming model request and therefore has its own token usage and provider cost.
+3. Sends an immutable snapshot of the resulting conversation and tool schemas to the model via LiteLLM. Primary and fallback models are preflighted independently because their limits and tokenizers may differ.
+4. If the model requests tool calls, `run_tool_calls` first walks them **sequentially** in the main thread, resolving any that require confirmation (`CONFIRM_TOOLS`). Declined calls short-circuit to a "cancelled" result.
+5. The remaining approved calls run **concurrently**, each dispatched via `asyncio.to_thread` so ordinary blocking tool code doesn't need to be rewritten as async, and gathered with `asyncio.gather`.
+6. Tool results are appended to the conversation and the loop continues until the model returns a final answer or `max_iterations` is hit. Provider usage is logged for observability, while the next request is always counted afresh rather than using a cumulative token total.
 
 Note on the file tools: `FILES_ROOT` path-jailing (`tools/files.py`) prevents path traversal *within the running process*, but this is an application-level check, not OS-level isolation — see [Roadmap](#roadmap--known-limitations).
 

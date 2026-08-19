@@ -34,7 +34,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["logging_config", "main"]
+py-modules = ["compaction", "logging_config", "main"]
 packages = ["tools"]
 
 [tool.pytest.ini_options]

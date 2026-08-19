@@ -25,9 +25,15 @@ profiles:
     model: openai/qwen3.5-2b
     api_base: http://127.0.0.1:8080/v1
     api_key: sk-noop
+    metadata_provider: llamacpp
 
 embedding_model: gemini/gemini-embedding-001
 
 max_completion_tokens: 4096
+context_trigger_ratio: 0.85
+context_target_ratio: 0.60
+context_safety_tokens: 512
+compaction_max_completion_tokens: 1024
+context_window_overrides: {}
 system_prompt:
 max_iterations: 200

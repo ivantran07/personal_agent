@@ -14,9 +14,12 @@ LOGGER_NAMESPACE = "personal_agent"
 
 _ALLOWED_FIELDS = {
     "attempt",
+    "completion_tokens",
+    "context_window",
     "delay_seconds",
     "error_type",
     "event",
+    "input_tokens",
     "level",
     "logger",
     "max_attempts",
@@ -24,9 +27,14 @@ _ALLOWED_FIELDS = {
     "model",
     "next_model",
     "profile",
+    "prompt_tokens",
+    "previous_input_tokens",
     "reason",
+    "request_kind",
+    "response_model",
     "status_code",
     "timestamp",
+    "total_tokens",
     "tool_name",
     "traceback",
 }
